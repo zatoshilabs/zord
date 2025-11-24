@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zord · Rare & Exotic Zats</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header class="hero">
+        <div>
+            <p class="tag">🆉 Rare & exotic zats</p>
+            <h1>Zord Index</h1>
+            <p class="lede">A CC0 explorer for inscriptions, ZRC-20 tokens, and names forged on Zcash.</p>
+        </div>
+        <zord-status></zord-status>
+    </header>
+
+    <main>
+        <section id="inscriptions">
+            <div class="section-heading">
+                <div>
+                    <h2>Inscriptions</h2>
+                    <p>Ord-compatible feed with content-aware previews.</p>
+                </div>
+                <div class="actions">
+                    <button data-target="inscriptions" data-action="prev">Prev</button>
+                    <button data-target="inscriptions" data-action="next">Next</button>
+                </div>
+            </div>
+            <inscription-feed page-size="24"></inscription-feed>
+        </section>
+
+        <section id="tokens">
+            <div class="section-heading">
+                <div>
+                    <h2>ZRC-20 Index</h2>
+                    <p>Progress-aware supply overview inspired by ord.</p>
+                </div>
+                <div class="actions">
+                    <button data-target="tokens" data-action="prev">Prev</button>
+                    <button data-target="tokens" data-action="next">Next</button>
+                </div>
+            </div>
+            <token-table page-size="100"></token-table>
+        </section>
+
+        <section id="names">
+            <div class="section-heading">
+                <div>
+                    <h2>ZNS Roll</h2>
+                    <p>First-is-first registry for .zec and .zcash handles.</p>
+                </div>
+                <div class="actions">
+                    <button data-target="names" data-action="prev">Prev</button>
+                    <button data-target="names" data-action="next">Next</button>
+                </div>
+            </div>
+            <name-table page-size="100"></name-table>
+        </section>
+    </main>
+
+    <footer>
+        <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index.zatoshi.market</a>. Source released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.</p>
+    </footer>
+
+    <script type="module" src="/static/app.js"></script>
+</body>
+</html>

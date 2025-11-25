@@ -178,6 +178,26 @@ impl Db {
         Ok(tokens)
     }
 
+    pub fn search_tokens(&self, query: &str, limit: usize) -> Result<Vec<(String, String)>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TOKENS)?;
+        let mut tokens = Vec::new();
+        // Perform a case-insensitive full table scan.
+        // Note: This is acceptable for the current dataset size.
+        let query_lower = query.to_lowercase();
+        for item in table.iter()? {
+            let (k, v) = item?;
+            let ticker = k.value();
+            if ticker.to_lowercase().contains(&query_lower) {
+                tokens.push((ticker.to_string(), v.value().to_string()));
+                if tokens.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(tokens)
+    }
+
     pub fn get_token_info(&self, ticker: &str) -> Result<Option<String>> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(TOKENS)?;
@@ -382,6 +402,26 @@ impl Db {
         for item in table.iter()?.rev().skip(offset).take(limit) {
             let (k, v) = item?;
             names.push((k.value().to_string(), v.value().to_string()));
+        }
+        Ok(names)
+    }
+
+    pub fn search_names(&self, query: &str, limit: usize) -> Result<Vec<(String, String)>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(NAMES)?;
+        let mut names = Vec::new();
+        let query_lower = query.to_lowercase();
+        
+        // Perform a case-insensitive full table scan.
+        for item in table.iter()? {
+            let (k, v) = item?;
+            let name = k.value();
+            if name.to_lowercase().contains(&query_lower) {
+                names.push((name.to_string(), v.value().to_string()));
+                if names.len() >= limit {
+                    break;
+                }
+            }
         }
         Ok(names)
     }

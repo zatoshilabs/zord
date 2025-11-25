@@ -17,6 +17,7 @@ const MAX_PAGE_SIZE: usize = 200;
 struct PaginationParams {
     page: Option<usize>,
     limit: Option<usize>,
+    q: Option<String>,
 }
 
 impl PaginationParams {
@@ -79,8 +80,8 @@ pub async fn start_api(db: Db, port: u16) {
     let app = Router::new()
         // Frontend entry + component redirects
         .route("/", get(frontpage))
-        .route("/tokens", get(tokens_redirect))
-        .route("/names", get(names_redirect))
+        .route("/tokens", get(tokens_page))
+        .route("/names", get(names_page))
         .route("/api", get(api_docs))
         // JSON feeds consumed by the new UI
         .route("/api/v1/inscriptions", get(get_inscriptions_feed))
@@ -399,24 +400,7 @@ async fn get_inscription_by_number(
     State(state): State<AppState>,
     Path(number): Path<u64>,
 ) -> Json<serde_json::Value> {
-    // We need to implement get_inscription_by_number in db.rs first?
-    // Wait, I can access the table directly if I expose it, but better to add a method to Db.
-    // Checking db.rs... I added the tables but not the accessor methods in the previous turn?
-    // Ah, I see I added `INSCRIPTION_NUMBERS` table but didn't add a `get_inscription_by_number` method to `Db` struct in `src/db.rs`.
-    // I should probably add the method to `src/db.rs` first.
-    // But for now, let's assume I'll add it.
-
-    // Actually, I'll implement the handler logic here assuming the DB method exists,
-    // and then I will go update db.rs to ensure the method exists.
-    // Wait, if I update api.rs first, it might fail to compile if I run check.
-    // I should update db.rs FIRST.
-
-    // Re-reading my thought process: I will update db.rs first in the next tool call.
-    // But I am already in the replace_file_content for api.rs.
-    // I will comment out the implementation or just put a placeholder,
-    // OR I can just do the db.rs update in the next step and it's fine since I'm not compiling yet.
-
-    // Let's write the handler code assuming `state.db.get_inscription_by_number(number)` exists.
+    // Retrieve inscription ID by its number
 
     let id = state.db.get_inscription_by_number(number).unwrap_or(None);
     if let Some(inscription_id) = id {
@@ -488,12 +472,18 @@ async fn frontpage() -> Html<&'static str> {
     Html(FRONT_HTML)
 }
 
-async fn tokens_redirect() -> Redirect {
-    Redirect::permanent("/#tokens")
+async fn tokens_page() -> Html<String> {
+    match std::fs::read_to_string("web/tokens.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<h1>Tokens page not found</h1>".to_string()),
+    }
 }
 
-async fn names_redirect() -> Redirect {
-    Redirect::permanent("/#names")
+async fn names_page() -> Html<String> {
+    match std::fs::read_to_string("web/names.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<h1>Names page not found</h1>".to_string()),
+    }
 }
 
 async fn get_inscriptions_feed(
@@ -554,14 +544,28 @@ async fn get_tokens_feed(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<TokenSummary>>, StatusCode> {
     let (page, limit) = params.resolve();
-    let total = state.db.get_token_count().map_err(|err| {
-        tracing::error!("token count error: {}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let rows = state.db.get_tokens_page(page, limit).map_err(|err| {
-        tracing::error!("token page error: {}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    
+    let (rows, total) = if let Some(query) = &params.q {
+        if query.trim().is_empty() {
+             let total = state.db.get_token_count().unwrap_or(0);
+             let rows = state.db.get_tokens_page(page, limit).unwrap_or_default();
+             (rows, total)
+        } else {
+            let rows = state.db.search_tokens(query, 100).unwrap_or_default();
+            let total = rows.len() as u64;
+            (rows, total)
+        }
+    } else {
+        let total = state.db.get_token_count().map_err(|err| {
+            tracing::error!("token count error: {}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let rows = state.db.get_tokens_page(page, limit).map_err(|err| {
+            tracing::error!("token page error: {}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        (rows, total)
+    };
 
     let offset = (page as u64).saturating_mul(limit as u64);
     let has_more = offset + (rows.len() as u64) < total;
@@ -581,6 +585,7 @@ async fn get_tokens_feed(
             let max_base_units = parse_decimal_amount(&max, dec_value)
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| "0".to_string());
+            // Use u128 for precision if possible, but f64 is needed for division/progress
             let max_float = max_base_units.parse::<f64>().unwrap_or(0.0);
             let progress = if max_float == 0.0 {
                 0.0
@@ -617,14 +622,28 @@ async fn get_names_feed(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<NameSummary>>, StatusCode> {
     let (page, limit) = params.resolve();
-    let total = state.db.get_name_count().map_err(|err| {
-        tracing::error!("name count error: {}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let rows = state.db.get_names_page(page, limit).map_err(|err| {
-        tracing::error!("name page error: {}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    
+    let (rows, total) = if let Some(query) = &params.q {
+        if query.trim().is_empty() {
+             let total = state.db.get_name_count().unwrap_or(0);
+             let rows = state.db.get_names_page(page, limit).unwrap_or_default();
+             (rows, total)
+        } else {
+            let rows = state.db.search_names(query, 100).unwrap_or_default();
+            let total = rows.len() as u64;
+            (rows, total)
+        }
+    } else {
+        let total = state.db.get_name_count().map_err(|err| {
+            tracing::error!("name count error: {}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let rows = state.db.get_names_page(page, limit).map_err(|err| {
+            tracing::error!("name page error: {}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        (rows, total)
+    };
 
     let offset = (page as u64).saturating_mul(limit as u64);
     let has_more = offset + (rows.len() as u64) < total;
@@ -816,7 +835,7 @@ async fn get_all_tokens_api(State(state): State<AppState>) -> Json<serde_json::V
 
             // Parse supply (stored as base units)
             let supply_str = info["supply"].as_str().unwrap_or("0");
-            if let Ok(supply_base) = supply_str.parse::<u64>() {
+            if let Ok(supply_base) = supply_str.parse::<u128>() {
                 info["supply_display"] =
                     serde_json::json!((supply_base as f64 / divisor).to_string());
             }
@@ -845,20 +864,27 @@ async fn get_all_tokens_api(State(state): State<AppState>) -> Json<serde_json::V
 }
 
 // Helper function to parse amounts with decimals
-fn parse_decimal_amount(amount_str: &str, decimals: u32) -> Result<u64, std::num::ParseIntError> {
+fn parse_decimal_amount(amount_str: &str, decimals: u32) -> Result<u128, std::num::ParseIntError> {
     if amount_str.contains('.') {
         let parts: Vec<&str> = amount_str.split('.').collect();
-        let whole: u64 = parts[0].parse()?;
+        let whole: u128 = parts[0].parse()?;
         let frac = if parts.len() > 1 { parts[1] } else { "0" };
 
-        // Pad or truncate fractional part to match decimals
-        let frac_padded = format!("{:0<width$}", frac, width = decimals as usize);
-        let frac_value: u64 = frac_padded.parse()?;
+        // Truncate if longer than decimals
+        let frac_truncated = if frac.len() > decimals as usize {
+            &frac[..decimals as usize]
+        } else {
+            frac
+        };
 
-        Ok(whole * 10u64.pow(decimals) + frac_value)
+        // Pad fractional part to match decimals
+        let frac_padded = format!("{:0<width$}", frac_truncated, width = decimals as usize);
+        let frac_value: u128 = frac_padded.parse()?;
+
+        Ok(whole * 10u128.pow(decimals) + frac_value)
     } else {
-        let whole: u64 = amount_str.parse()?;
-        Ok(whole * 10u64.pow(decimals))
+        let whole: u128 = amount_str.parse()?;
+        Ok(whole * 10u128.pow(decimals))
     }
 }
 

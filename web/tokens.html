@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tokens · Zord</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+
+<body>
+    <header class="hero small">
+        <div>
+            <p class="tag"><a href="/" style="color: inherit; text-decoration: none;">← Back to Index</a></p>
+            <h1>ZRC-20 Tokens</h1>
+        </div>
+        <zord-status></zord-status>
+    </header>
+
+    <main>
+        <section>
+            <div class="search-bar">
+                <input type="text" id="token-search" placeholder="Search tokens by ticker..." autocomplete="off">
+            </div>
+
+            <token-table page-size="100" id="token-list"></token-table>
+        </section>
+    </main>
+
+    <footer>
+        <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank"
+                rel="noreferrer">index.zatoshi.market</a>. Source released under <a
+                href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.
+        </p>
+    </footer>
+
+    <script type="module" src="/static/app.js"></script>
+    <script>
+        // Simple search handler
+        const searchInput = document.getElementById('token-search');
+        const tokenTable = document.getElementById('token-list');
+        let debounceTimer;
+
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                const query = e.target.value.trim();
+                tokenTable.setAttribute('search-query', query);
+            }, 300);
+        });
+    </script>
+</body>
+
+</html>

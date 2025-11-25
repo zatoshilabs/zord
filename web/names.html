@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Names · Zord</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+
+<body>
+    <header class="hero small">
+        <div>
+            <p class="tag"><a href="/" style="color: inherit; text-decoration: none;">← Back to Index</a></p>
+            <h1>ZNS Names</h1>
+        </div>
+        <zord-status></zord-status>
+    </header>
+
+    <main>
+        <section>
+            <div class="search-bar">
+                <input type="text" id="name-search" placeholder="Search names (e.g. satoshi.zec)..." autocomplete="off">
+            </div>
+
+            <name-table page-size="100" id="name-list"></name-table>
+        </section>
+    </main>
+
+    <footer>
+        <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank"
+                rel="noreferrer">index.zatoshi.market</a>. Source released under <a
+                href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.
+        </p>
+    </footer>
+
+    <script type="module" src="/static/app.js"></script>
+    <script>
+        // Simple search handler
+        const searchInput = document.getElementById('name-search');
+        const nameTable = document.getElementById('name-list');
+        let debounceTimer;
+
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                const query = e.target.value.trim();
+                nameTable.setAttribute('search-query', query);
+            }, 300);
+        });
+    </script>
+</body>
+
+</html>

@@ -8,9 +8,22 @@ class PaginatedComponent extends HTMLElement {
     connectedCallback() {
         this.page = 0;
         this.limit = parseInt(this.getAttribute('page-size') || '24', 10);
+        this.query = this.getAttribute('search-query') || '';
         this.hasMore = true;
         this.setup();
         this.fetchPage();
+    }
+
+    static get observedAttributes() {
+        return ['search-query'];
+    }
+
+    attributeChangedCallback(name, oldValue, newValue) {
+        if (name === 'search-query' && oldValue !== newValue) {
+            this.query = newValue;
+            this.page = 0;
+            this.fetchPage();
+        }
     }
 
     setup() {
@@ -29,7 +42,8 @@ class PaginatedComponent extends HTMLElement {
     async fetchPage() {
         this.setPlaceholder('Loading…');
         try {
-            const res = await fetch(`${this.endpoint}?page=${this.page}&limit=${this.limit}`);
+            const q = this.query ? `&q=${encodeURIComponent(this.query)}` : '';
+            const res = await fetch(`${this.endpoint}?page=${this.page}&limit=${this.limit}${q}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             this.hasMore = data.has_more;

@@ -12,7 +12,7 @@ COPY src ./src
 
 # Install build dependencies
 RUN apt-get update && \
-    apt-get install -y pkg-config libssl-dev && \
+    apt-get install -y build-essential pkg-config libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Build release binary

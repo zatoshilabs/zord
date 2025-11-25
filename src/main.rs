@@ -28,7 +28,8 @@ async fn main() -> Result<()> {
     // Config
     let db_path = env::var("DB_PATH").unwrap_or("./data/index".to_string());
     let api_port = env::var("API_PORT")
-        .unwrap_or("8080".to_string())
+        .or_else(|_| env::var("PORT"))
+        .unwrap_or_else(|_| "8080".to_string())
         .parse::<u16>()?;
 
     // Components

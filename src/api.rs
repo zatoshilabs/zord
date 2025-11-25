@@ -49,8 +49,10 @@ struct InscriptionSummary {
     content_type: String,
     sender: String,
     txid: String,
+    block_time: Option<u64>,
     block_height: Option<u64>,
     content_length: usize,
+    shielded: bool,
     preview_text: Option<String>,
 }
 
@@ -79,17 +81,19 @@ pub async fn start_api(db: Db, port: u16) {
     let state = AppState { db };
 
     let app = Router::new()
-        // Frontend entry + component redirects
+        // Static HTML entry points
         .route("/", get(frontpage))
         .route("/tokens", get(tokens_page))
         .route("/names", get(names_page))
+        .route("/docs", get(docs_page))
+        .route("/spec", get(spec_page))
         .route("/api", get(api_docs))
-        // JSON feeds consumed by the new UI
+        // JSON feeds powering the frontend widgets
         .route("/api/v1/inscriptions", get(get_inscriptions_feed))
         .route("/api/v1/tokens", get(get_tokens_feed))
         .route("/api/v1/names", get(get_names_feed))
         .route("/api/v1/status", get(get_status))
-        // Ordinals-compatible routes
+        // Compatibility endpoints for Ord-style tools
         .route("/inscription/:id", get(get_inscription))
         .route("/inscriptions", get(get_recent_inscriptions))
         .route("/content/:id", get(get_inscription_content))
@@ -97,7 +101,7 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/block/:query", get(get_block))
         .route("/tx/:txid", get(get_transaction))
         .route("/status", get(get_status))
-        // Backwards-compatibility + helpers
+        // Misc helper endpoints
         .route("/health", get(health))
         .route("/block/height", get(get_block_height))
         .route(
@@ -114,7 +118,7 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/names/list", get(get_all_names_api))
         .route("/name/:name", get(get_name_info))
         .route("/resolve/:name", get(resolve_name))
-        // Static files (must be last)
+        // Static asset server (keep last)
         .nest_service("/static", ServeDir::new("web"))
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -349,7 +353,7 @@ async fn get_inscription_content(
     let content_type = val["content_type"].as_str().unwrap_or("text/plain");
     let content_hex = val["content_hex"].as_str().unwrap_or("");
 
-    // Decode hex to bytes
+    // Materialize stored hex payload
     let content_bytes = match hex::decode(content_hex) {
         Ok(bytes) => bytes,
         Err(_) => {
@@ -357,7 +361,7 @@ async fn get_inscription_content(
         }
     };
 
-    // Return with proper content-type header
+    // Preserve original MIME type
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, content_type)],
@@ -370,11 +374,11 @@ async fn get_inscription_by_number(
     State(state): State<AppState>,
     Path(number): Path<u64>,
 ) -> Json<serde_json::Value> {
-    // Retrieve inscription ID by its number
+    // Lookup inscription by ordinal number
 
     let id = state.db.get_inscription_by_number(number).unwrap_or(None);
     if let Some(inscription_id) = id {
-        // Redirect or just return the inscription? Let's return the inscription.
+        // Embed the resolved id/number in the JSON blob
         let meta = state.db.get_inscription(&inscription_id).unwrap_or(None);
         if let Some(m) = meta {
             let mut val = serde_json::from_str::<serde_json::Value>(&m)
@@ -436,7 +440,7 @@ async fn get_balance(
     }))
 }
 
-// Ordinals-compatible routes
+// Minimal HTML shells used by browsers
 
 async fn frontpage() -> Html<&'static str> {
     Html(FRONT_HTML)
@@ -445,14 +449,28 @@ async fn frontpage() -> Html<&'static str> {
 async fn tokens_page() -> Html<String> {
     match std::fs::read_to_string("web/tokens.html") {
         Ok(content) => Html(content),
-        Err(_) => Html("<h1>Tokens page not found</h1>".to_string()),
+        Err(_) => Html("<p>tokens page missing</p>".to_string()),
     }
 }
 
 async fn names_page() -> Html<String> {
     match std::fs::read_to_string("web/names.html") {
         Ok(content) => Html(content),
-        Err(_) => Html("<h1>Names page not found</h1>".to_string()),
+        Err(_) => Html("<p>names page missing</p>".to_string()),
+    }
+}
+
+async fn docs_page() -> Html<String> {
+    match std::fs::read_to_string("web/docs.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<p>docs page missing</p>".to_string()),
+    }
+}
+
+async fn spec_page() -> Html<String> {
+    match std::fs::read_to_string("web/spec.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<p>spec page missing</p>".to_string()),
     }
 }
 
@@ -482,11 +500,13 @@ async fn get_inscriptions_feed(
             .to_string();
         let sender = parsed["sender"].as_str().unwrap_or("unknown").to_string();
         let txid = parsed["txid"].as_str().unwrap_or("").to_string();
+        let block_time = parsed["block_time"].as_u64();
         let block_height = parsed["block_height"].as_u64();
         let content_length = parsed["content_hex"]
             .as_str()
             .map(|hex| hex.len() / 2)
             .unwrap_or(0);
+        let shielded = parsed["sender"].as_str().map(|addr| addr.starts_with('z')).unwrap_or(false);
         let preview_text = build_preview(&content_type, &parsed);
 
         items.push(InscriptionSummary {
@@ -494,8 +514,10 @@ async fn get_inscriptions_feed(
             content_type,
             sender,
             txid,
+            block_time,
             block_height,
             content_length,
+            shielded,
             preview_text,
         });
     }
@@ -555,7 +577,7 @@ async fn get_tokens_feed(
             let max_base_units = parse_decimal_amount(&max, dec_value)
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| "0".to_string());
-            // Use u128 for precision if possible, but f64 is needed for division/progress
+            // Progress bar uses f64 since UI only needs approximate completion
             let max_float = max_base_units.parse::<f64>().unwrap_or(0.0);
             let progress = if max_float == 0.0 {
                 0.0
@@ -666,7 +688,7 @@ async fn get_inscription_preview(
     let id_attr = html_escape::encode_double_quoted_attribute(&id).to_string();
     let title = html_escape::encode_text(&id).to_string();
 
-    // Build HTML preview
+    // Derive an inline preview depending on MIME type
     let preview_html = if content_type.starts_with("image/") {
         format!(
             r#"<!DOCTYPE html>
@@ -679,7 +701,7 @@ async fn get_inscription_preview(
             title, id_attr
         )
     } else if content_type == "text/html" {
-        // Serve HTML directly via content route
+        // Wrap HTML inscriptions in an iframe so we sandbox execution
         format!(
             r#"<!DOCTYPE html>
 <html>
@@ -724,7 +746,7 @@ async fn get_block(
     State(_state): State<AppState>,
     Path(query): Path<String>,
 ) -> Json<serde_json::Value> {
-    // Simple placeholder - would need RPC connection to get block details
+        // RPC stub (wire to Zcash RPC if block explorer is required)
     Json(serde_json::json!({
         "error": "Block explorer not yet implemented",
         "query": query
@@ -735,7 +757,7 @@ async fn get_transaction(
     State(_state): State<AppState>,
     Path(txid): Path<String>,
 ) -> Json<serde_json::Value> {
-    // Simple placeholder - would need RPC connection to get tx details
+    // RPC stub for transaction lookup
     Json(serde_json::json!({
         "error": "Transaction explorer not yet implemented",
         "txid": txid
@@ -796,21 +818,21 @@ async fn get_all_tokens_api(State(state): State<AppState>) -> Json<serde_json::V
         if let Ok(mut info) = serde_json::from_str::<serde_json::Value>(&info_str) {
             info["ticker"] = serde_json::Value::String(ticker);
 
-            // Format supply and max with proper decimal handling
+            // Normalize supply/max based on decimals stored on-chain
             let dec = info["dec"]
                 .as_str()
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(18);
             let divisor = 10u64.pow(dec) as f64;
 
-            // Parse supply (stored as base units)
+            // Supply is persisted in base units
             let supply_str = info["supply"].as_str().unwrap_or("0");
             if let Ok(supply_base) = supply_str.parse::<u128>() {
                 info["supply_display"] =
                     serde_json::json!((supply_base as f64 / divisor).to_string());
             }
 
-            // Parse max (stored as human-readable, need to multiply for base units)
+            // Max field is human readable; convert to base units for comparison
             let max_str = info["max"].as_str().unwrap_or("0");
             if let Ok(max_value) = parse_decimal_amount(max_str, dec) {
                 info["max_display"] = serde_json::json!(max_str);
@@ -821,11 +843,11 @@ async fn get_all_tokens_api(State(state): State<AppState>) -> Json<serde_json::V
         }
     }
 
-    // Sort by inscription_id (reverse chronological order - newest first)
+    // Order newest-first by inscription id (ids encode creation order)
     token_list.sort_by(|a, b| {
         let id_a = a["inscription_id"].as_str().unwrap_or("");
         let id_b = b["inscription_id"].as_str().unwrap_or("");
-        id_b.cmp(id_a) // Reversed for newest first
+        id_b.cmp(id_a) // Keep newest entries at the top
     });
 
     Json(serde_json::json!({
@@ -833,21 +855,21 @@ async fn get_all_tokens_api(State(state): State<AppState>) -> Json<serde_json::V
     }))
 }
 
-// Helper function to parse amounts with decimals
+// Parse a human-readable quantity into base units respecting decimals
 fn parse_decimal_amount(amount_str: &str, decimals: u32) -> Result<u128, std::num::ParseIntError> {
     if amount_str.contains('.') {
         let parts: Vec<&str> = amount_str.split('.').collect();
         let whole: u128 = parts[0].parse()?;
         let frac = if parts.len() > 1 { parts[1] } else { "0" };
 
-        // Truncate if longer than decimals
+        // Clamp fractional digits to declared precision
         let frac_truncated = if frac.len() > decimals as usize {
             &frac[..decimals as usize]
         } else {
             frac
         };
 
-        // Pad fractional part to match decimals
+        // Pad right side so we can treat the value as an integer
         let frac_padded = format!("{:0<width$}", frac_truncated, width = decimals as usize);
         let frac_value: u128 = frac_padded.parse()?;
 
@@ -918,7 +940,7 @@ fn format_decimal(value: f64) -> String {
     }
 }
 
-// Names API handlers
+// ZNS helper endpoints
 async fn get_all_names_api(State(state): State<AppState>) -> Json<serde_json::Value> {
     let names = state.db.get_all_names().unwrap_or_default();
 
@@ -929,7 +951,7 @@ async fn get_all_names_api(State(state): State<AppState>) -> Json<serde_json::Va
         }
     }
 
-    // Sort by inscription_id (chronological order - first registered = first in list)
+    // Preserve mint order (inscription_id encodes creation sequence)
     name_list.sort_by(|a, b| {
         let id_a = a["inscription_id"].as_str().unwrap_or("");
         let id_b = b["inscription_id"].as_str().unwrap_or("");

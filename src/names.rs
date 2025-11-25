@@ -19,14 +19,14 @@ impl NamesEngine {
         content: &str,
         content_type: &str,
     ) -> Result<()> {
-        // Only process text/plain inscriptions
+        // Ignore anything other than plain text payloads
         if content_type != "text/plain" {
-            return Ok(()); // Ignore non-text inscriptions
+            return Ok(());
         }
 
         let name = content.trim();
 
-        // Validate and register
+        // Accept first writer only
         if self.validate_name(name).is_ok() {
             self.handle_registration(name, inscription_id, owner)?;
         }
@@ -35,24 +35,24 @@ impl NamesEngine {
     }
 
     fn validate_name(&self, name: &str) -> Result<()> {
-        // Must end with .zec or .zcash
+        // Only .zec and .zcash suffixes are supported
         if !name.ends_with(".zec") && !name.ends_with(".zcash") {
             return Err(anyhow::anyhow!("Name must end with .zec or .zcash"));
         }
 
-        // Extract base name (without extension)
+        // Strip the extension for validation
         let base_name = if name.ends_with(".zcash") {
             &name[..name.len() - 6]
         } else {
             &name[..name.len() - 4]
         };
 
-        // Base name must not be empty
+        // Disallow empty labels (e.g. ".zec")
         if base_name.is_empty() {
             return Err(anyhow::anyhow!("Name cannot be empty"));
         }
 
-        // Total length check (reasonable limit)
+        // DNS-style length guard
         if name.len() > 253 {
             return Err(anyhow::anyhow!("Name too long (max 253 characters)"));
         }
@@ -61,17 +61,16 @@ impl NamesEngine {
     }
 
     fn handle_registration(&self, name: &str, inscription_id: &str, owner: &str) -> Result<()> {
-        // Names are case-insensitive but preserve original case in display
+        // Store lower-case key, but keep caller formatting for display
         let name_lower = name.to_lowercase();
 
-        // Check if name already exists (first-is-first)
+        // First registration wins
         if self.db.get_name(&name_lower)?.is_some() {
             return Err(anyhow::anyhow!("Name already registered"));
         }
 
-        // Register the name
         let name_data = serde_json::json!({
-            "name": name, // Preserve original case for display
+            "name": name,
             "name_lower": name_lower,
             "owner": owner,
             "inscription_id": inscription_id,

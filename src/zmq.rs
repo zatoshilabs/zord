@@ -25,19 +25,17 @@ impl ZmqListener {
             tracing::info!("Connecting to ZMQ at {}", url);
             subscriber.connect(&url).expect("Failed to connect to ZMQ");
 
-            // Subscribe to rawblock (or hashblock if available, but rawblock is confirmed in config)
-            // We just use it as a trigger, so we don't care about the content for now.
+            // Subscribe to rawblock notifications (hashblock works as a fallback)
             subscriber
                 .set_subscribe(b"rawblock")
                 .expect("Failed to subscribe");
-            subscriber.set_subscribe(b"hashblock").ok(); // Try this too just in case
+            subscriber.set_subscribe(b"hashblock").ok();
 
             loop {
-                // ZMQ multipart: [topic, body]
+                // Consume the topic frame and the raw payload frame
                 if subscriber.recv_msg(0).is_ok() {
-                    // We don't strictly need the body if we just use this as a trigger
                     if subscriber.recv_msg(0).is_ok() {
-                        // Notify indexer
+                        // Signal the async loop so it rechecks RPC height
                         if let Err(_) = sender.blocking_send(()) {
                             tracing::info!("ZMQ receiver dropped, stopping listener");
                             break;

@@ -6,29 +6,29 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// Table Definitions
+// redb table schemas
 const BLOCKS: TableDefinition<u64, &str> = TableDefinition::new("blocks");
 const INSCRIPTIONS: TableDefinition<&str, &str> = TableDefinition::new("inscriptions");
 const TOKENS: TableDefinition<&str, &str> = TableDefinition::new("tokens");
 
-// BRC-20 compliant balance tracking: address:ticker -> (available, overall)
+// Balance table keyed by "address:ticker"
 const BALANCES: TableDefinition<&str, &str> = TableDefinition::new("balances");
 
-// Transfer inscriptions: inscription_id -> transfer_data
+// Pending transfer metadata keyed by inscription id
 const TRANSFER_INSCRIPTIONS: TableDefinition<&str, &str> =
     TableDefinition::new("transfer_inscriptions");
 
-// Inscription number mapping: number -> inscription_id
+// Ordinal number -> inscription id mapping
 const INSCRIPTION_NUMBERS: TableDefinition<u64, &str> = TableDefinition::new("inscription_numbers");
-// Address index: address -> json_list_of_inscription_ids
+// Address index contains a JSON list of inscription ids
 const ADDRESS_INSCRIPTIONS: TableDefinition<&str, &str> =
     TableDefinition::new("address_inscriptions");
-// Inscription state: inscription_id -> current_owner
+// Latest owner map for quick lookups
 const INSCRIPTION_STATE: TableDefinition<&str, &str> = TableDefinition::new("inscription_state");
-// Global stats
+// Simple aggregate counters
 const STATS: TableDefinition<&str, u64> = TableDefinition::new("stats");
 
-// Names: name -> name_data (ZNS - Zcash Name Service)
+// ZNS backing store
 const NAMES: TableDefinition<&str, &str> = TableDefinition::new("names");
 
 #[derive(Clone)]
@@ -98,7 +98,7 @@ impl Db {
             let mut table = write_txn.open_table(INSCRIPTIONS)?;
             table.insert(id, data)?;
 
-            // Update global count and number mapping
+            // Maintain monotonic inscription numbering for API lookups
             let mut stats = write_txn.open_table(STATS)?;
             let count = stats
                 .get("inscription_count")?
@@ -110,7 +110,7 @@ impl Db {
             let mut numbers = write_txn.open_table(INSCRIPTION_NUMBERS)?;
             numbers.insert(number, id)?;
 
-            // Parse data to get address (simplified)
+            // Index sender so `/address/:addr/inscriptions` can return results
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                 if let Some(sender) = json["sender"].as_str() {
                     let mut addr_index = write_txn.open_table(ADDRESS_INSCRIPTIONS)?;
@@ -122,8 +122,7 @@ impl Db {
                     list.push(id.to_string());
                     addr_index.insert(sender, serde_json::to_string(&list)?.as_str())?;
                 }
-                // Also index receiver if different? For now just sender/owner.
-                // Ideally we track ownership changes, but this is a start.
+                // Receiver tracking is future work; today we key by sender only
             }
         }
         write_txn.commit()?;
@@ -182,8 +181,7 @@ impl Db {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(TOKENS)?;
         let mut tokens = Vec::new();
-        // Perform a case-insensitive full table scan.
-        // Note: This is acceptable for the current dataset size.
+        // Case-insensitive scan (dataset is small enough for a linear walk)
         let query_lower = query.to_lowercase();
         for item in table.iter()? {
             let (k, v) = item?;
@@ -223,7 +221,7 @@ impl Db {
         Ok(())
     }
 
-    // BRC-20 compliant balance operations
+    // Balance helpers (available vs overall mirrors BRC-20 semantics)
     pub fn get_balance(&self, address: &str, ticker: &str) -> Result<Balance> {
         let key = format!("{}:{}", address, ticker);
         let read_txn = self.db.begin_read()?;
@@ -260,7 +258,7 @@ impl Db {
                 }
             };
 
-            // Check for underflow
+            // Standard saturating math
             if available_delta < 0 && current.available < (-available_delta as u64) {
                 return Err(anyhow::anyhow!("Insufficient available balance"));
             }
@@ -287,7 +285,7 @@ impl Db {
         Ok(())
     }
 
-    // Transfer inscription operations
+    // Transfer inscription helpers
     pub fn create_transfer_inscription(&self, inscription_id: &str, data: &str) -> Result<()> {
         let write_txn = self.db.begin_write()?;
         {
@@ -375,12 +373,12 @@ impl Db {
         Ok(count)
     }
 
-    // Name (ZNS) operations
+    // Name (ZNS) helpers
     pub fn register_name(&self, name: &str, data: &str) -> Result<()> {
         let write_txn = self.db.begin_write()?;
         {
             let mut table = write_txn.open_table(NAMES)?;
-            // Check if already exists (first-is-first)
+            // Enforce first-writer-wins
             if table.get(name)?.is_some() {
                 return Err(anyhow::anyhow!("Name already registered"));
             }
@@ -412,7 +410,7 @@ impl Db {
         let mut names = Vec::new();
         let query_lower = query.to_lowercase();
         
-        // Perform a case-insensitive full table scan.
+        // Case-insensitive scan; fine for the current data volume
         for item in table.iter()? {
             let (k, v) = item?;
             let name = k.value();

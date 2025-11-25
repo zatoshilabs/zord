@@ -22,10 +22,12 @@
     </header>
 
     <main>
-        <div class="search">
-            <input id="token-search" type="text" placeholder="filter tickers" autocomplete="off">
+        <section class="search">
+            <input type="text" id="token-search" placeholder="filter tickers" autocomplete="off">
+        </section>
+        <div class="token-wrap">
+            <token-table page-size="120" id="token-list"></token-table>
         </div>
-        <token-table page-size="120" id="token-list"></token-table>
     </main>
 
     <script type="module" src="/static/app.js"></script>

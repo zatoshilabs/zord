@@ -60,14 +60,14 @@ impl Indexer {
                     }
                 }
             } else {
-                // We are at the tip. Wait for ZMQ notification or timeout.
+                // Tip reached; block on ZMQ or fall back to a periodic poll
                 tokio::select! {
                     _ = rx.recv() => {
                         tracing::debug!("Received ZMQ block notification");
-                        // Loop immediately to check for new block
+                        // Wake the loop to pick up the new height
                     }
                     _ = sleep(Duration::from_secs(10)) => {
-                        // Poll fallback
+                        // Timer path for deployments without ZMQ
                     }
                 }
             }
@@ -78,14 +78,14 @@ impl Indexer {
         let hash = self.rpc.get_block_hash(height).await?;
         let block = self.rpc.get_block(&hash).await?;
 
-        // Track inscriptions created in this block
+        // Keep a map to correlate parent/child inscriptions if needed later
         let mut inscriptions_in_block: HashMap<String, (String, String)> = HashMap::new();
 
-        // First pass: Find all new inscriptions (inscribe events)
+        // First pass: index every new inscription carried by the block
         for txid in &block.tx {
             let tx = self.rpc.get_raw_transaction(&txid).await?;
 
-            // Scan inputs for inscriptions (Ordinals-style in scriptSig)
+            // Zcash ordinals place the payload in scriptSig; walk each input
             for (_vin_index, vin) in tx.vin.iter().enumerate() {
                 if let Some(script_sig) = &vin.script_sig {
                     if let Some(inscription) = self.parse_inscription(&script_sig.asm, &txid, &tx) {
@@ -96,13 +96,11 @@ impl Indexer {
                         let content = inscription.4;
                         let content_hex = inscription.5;
 
-                        // Store for tracking
+                        // Track so later phases can link child inscriptions if required
                         inscriptions_in_block
                             .insert(inscription_id.clone(), (sender.clone(), content.clone()));
 
-                        // Save inscription to DB with content type and hex
-                        // Persist all descriptive fields so the HTTP layer can serve them without
-                        // rehydrating the block/transaction.
+                        // Persist enough metadata for the HTTP layer to render without additional RPC calls
                         let metadata = serde_json::json!({
                             "id": inscription_id,
                             "content": content,
@@ -119,7 +117,7 @@ impl Indexer {
                         self.db
                             .insert_inscription(&inscription_id, &metadata.to_string())?;
 
-                        // Log based on content type
+                        // Emit structured logs so ops can watch which payload types arrive
                         if content_type == "application/json" {
                             tracing::info!(
                                 "Found JSON inscription {} in block {}: {}",
@@ -150,7 +148,7 @@ impl Indexer {
                             );
                         }
 
-                        // Process ZRC-20 if it's JSON
+                        // JSON blobs may encode ZRC-20 ops; hand them to the engine
                         if content_type == "application/json" {
                             if let Err(e) = self.zrc20.process(
                                 "inscribe",
@@ -163,7 +161,7 @@ impl Indexer {
                             }
                         }
 
-                        // Process names if it's plain text
+                        // Plain text payloads may be ZNS registrations
                         if content_type == "text/plain" {
                             if let Err(e) = self.names.process(
                                 &inscription_id,
@@ -179,14 +177,8 @@ impl Indexer {
             }
         }
 
-        // Second pass: Detect transfer of existing inscriptions
-        // In a real implementation, we would track UTXO movements of inscriptions
-        // For MVP, we'll detect when an inscription appears in a different transaction
-        // This is simplified; a production indexer would need full UTXO tracking
-
-        // TODO: Implement inscription transfer detection
-        // This requires tracking which UTXOs contain inscriptions and detecting when they move
-        // For now, we'll focus on the inscribe events
+        // Transfer tracking is not implemented; full UTXO tracing will be required when
+        // inscription ownership is needed beyond insert-time metadata
 
         self.db.insert_block(height, &hash)?;
         Ok(())
@@ -202,56 +194,47 @@ impl Indexer {
     ) -> Option<(String, String, String, String, String, String)> {
         let parts: Vec<&str> = asm.split_whitespace().collect();
 
-        // Zerdinals uses a simpler format than Bitcoin Ordinals (no Taproot on Zcash)
-        // Look for content-type followed by content data in scriptSig
-        // Pattern is more flexible: <content_type_hex> <content_data_hex>...
+        // Zcash inscriptions embed "<mime-type-hex> <payload-hex> ..." in scriptSig
         for i in 0..parts.len() {
-            // Try to decode as potential content type (should contain "/")
+            // Interpret the part as UTF-8 and treat it as a MIME type if it looks sane
             if let Ok(bytes) = hex::decode(parts[i]) {
                 if let Ok(s) = String::from_utf8(bytes) {
-                    // Check if this looks like a MIME content type
                     if s.contains("/") && s.len() > 3 && s.len() < 100 {
                         let content_type = s;
 
-                        // Collect all following hex data chunks until sig/pubkey
+                        // Consume subsequent hex pushes until we hit what looks like sig/pubkey data
                         let mut content_chunks = Vec::new();
                         let mut j = i + 1;
 
                         while j < parts.len() {
                             let part = parts[j];
 
-                            // Skip small OP codes (1-2 chars like 0, 1, OP_codes)
+                            // Tiny tokens are usually opcodes; ignore them
                             if part.len() <= 2 {
                                 j += 1;
                                 continue;
                             }
 
-                            // Try to decode as hex data
                             if let Ok(data) = hex::decode(part) {
-                                // We're near the end if within last 3 positions
                                 let near_end = j >= parts.len() - 3;
 
-                                // Check for signature (starts with 0x30, DER format)
+                                // DER signatures start with 0x30 and are ~70 bytes
                                 let is_signature = data.len() >= 70
                                     && data.len() <= 74
                                     && data.get(0) == Some(&0x30);
 
-                                // Check for pubkey patterns:
-                                // - Exact 33 or 65 bytes (standard pubkey sizes)
-                                // - Starts with 0x02/0x03 (compressed) or 0x04 (uncompressed)
-                                // - Or starts with 0x21 (OP_PUSH 33 bytes) followed by pubkey
+                                // Pubkeys are either 33/65-byte blobs with the usual prefixes or
+                                // an OP_PUSH marker followed by 33 bytes
                                 let is_pubkey = (data.len() == 33
                                     && (data.get(0) == Some(&0x02) || data.get(0) == Some(&0x03)))
                                     || (data.len() == 65 && data.get(0) == Some(&0x04))
-                                    || (data.get(0) == Some(&0x21) && data.len() >= 34); // 0x21 = PUSH 33 bytes
+                                    || (data.get(0) == Some(&0x21) && data.len() >= 34); // 0x21 => push 33 bytes
 
-                                // Skip if it looks like a signature or pubkey, especially near the end
+                                // Stop accumulating once we bump into DER sigs or pubkeys near the end
                                 if near_end && (is_signature || is_pubkey) {
-                                    // Stop collecting content
                                     break;
                                 }
 
-                                // Otherwise, collect the content
                                 if data.len() > 0 {
                                     content_chunks.push(data);
                                 }
@@ -264,11 +247,11 @@ impl Indexer {
                             continue;
                         }
 
-                        // Concatenate all chunks
+                        // Flatten collected chunks into a single buffer
                         let content_bytes: Vec<u8> = content_chunks.into_iter().flatten().collect();
                         let content_hex = hex::encode(&content_bytes);
 
-                        // Try to decode as UTF-8 for text content types
+                        // Keep UTF-8 for text/json payloads so higher layers get a preview
                         let content_utf8 = if content_type.starts_with("text/")
                             || content_type == "application/json"
                         {
@@ -278,7 +261,7 @@ impl Indexer {
                             content_hex.clone()
                         };
 
-                        // Get sender/receiver from first vout
+                        // Use first vout address as a rough owner signal
                         let sender = if let Some(first_vout) = tx.vout.first() {
                             if let Some(addrs) = &first_vout.script_pub_key.addresses {
                                 addrs

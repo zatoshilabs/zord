@@ -15,7 +15,7 @@ pub struct ZcashRpcClient {
 pub struct BlockResponse {
     pub height: u64,
     pub hash: String,
-    pub tx: Vec<String>, // Tx IDs
+    pub tx: Vec<String>, // transaction ids
     pub time: u64,
     pub previousblockhash: Option<String>,
 }
@@ -72,7 +72,7 @@ impl ZcashRpcClient {
         let password = env::var("ZCASH_RPC_PASSWORD")
             .expect("ZCASH_RPC_PASSWORD must be provided via environment variable");
 
-        // Create Basic Auth header
+        // Compose HTTP Basic credentials
         let auth = format!("{}:{}", username, password);
         let auth_header = format!(
             "Basic {}",

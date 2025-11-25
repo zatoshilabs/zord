@@ -6,6 +6,14 @@ const targetSelectors = {
 
 const numberFormatter = new Intl.NumberFormat('en-US');
 
+const kindFromContentType = (type = '') => {
+    const lower = type.toLowerCase();
+    if (lower.includes('json')) return 'json';
+    if (lower.startsWith('text/')) return 'text';
+    if (lower.startsWith('image/')) return 'image';
+    return 'binary';
+};
+
 const formatNumber = (value) => {
     if (value === null || value === undefined || Number.isNaN(value)) {
         return '—';
@@ -95,6 +103,8 @@ class InscriptionFeed extends PaginatedComponent {
         super.setup();
         this.grid = document.createElement('div');
         this.grid.className = 'grid';
+        this.typeFilter = 'all';
+        this.items = [];
         this.container.appendChild(this.grid);
     }
 
@@ -108,32 +118,86 @@ class InscriptionFeed extends PaginatedComponent {
             return;
         }
 
+        this.items = Array.isArray(items) ? items : [];
+        this.renderCards();
+    }
+
+    setTypeFilter(kind) {
+        this.typeFilter = kind || 'all';
+        this.renderCards();
+    }
+
+    renderCards() {
         this.container.innerHTML = '';
         this.container.appendChild(this.grid);
         this.grid.innerHTML = '';
 
-        items.forEach((item) => {
-            const fig = document.createElement('figure');
-            fig.className = 'insc';
+        const filtered = this.items.filter((item) => {
+            const kind = kindFromContentType(item.content_type);
+            return this.typeFilter === 'all' || kind === this.typeFilter;
+        });
 
-            const frame = document.createElement('iframe');
-            frame.src = `/preview/${item.id}`;
-            frame.title = item.id;
-            frame.loading = 'lazy';
-            frame.setAttribute('sandbox', 'allow-scripts');
-            fig.appendChild(frame);
+        if (!filtered.length) {
+            this.setPlaceholder('No inscriptions for selection', 'empty');
+            return;
+        }
 
-            const caption = document.createElement('figcaption');
-            const link = document.createElement('a');
-            link.href = `/inscription/${item.id}`;
-            link.textContent = item.id.slice(0, 10) + '…';
-            caption.appendChild(link);
+        filtered.forEach((item) => {
+            const kind = kindFromContentType(item.content_type);
+            const card = document.createElement('article');
+            card.className = 'card';
+            card.dataset.kind = kind;
 
-            const meta = document.createElement('div');
-            meta.innerText = `${item.content_type} · ${formatBytes(item.content_length)} · ${truncateAddress(item.sender)}${item.block_height ? ' · ' + formatNumber(item.block_height) : ''}`;
-            fig.appendChild(caption);
-            fig.appendChild(meta);
-            this.grid.appendChild(fig);
+            const header = document.createElement('header');
+            const idLink = document.createElement('a');
+            idLink.href = `/inscription/${item.id}`;
+            idLink.textContent = item.id.slice(0, 12) + '…';
+            header.appendChild(idLink);
+
+            const typeTag = document.createElement('span');
+            typeTag.textContent = kind;
+            header.appendChild(typeTag);
+            card.appendChild(header);
+
+            if (kind === 'json') {
+                const pre = document.createElement('pre');
+                pre.textContent = 'loading json…';
+                card.appendChild(pre);
+                fetch(`/content/${item.id}`)
+                    .then((resp) => resp.text())
+                    .then((text) => {
+                        try {
+                            const pretty = JSON.stringify(JSON.parse(text), null, 2);
+                            pre.textContent = pretty.slice(0, 1200);
+                        } catch (err) {
+                            pre.textContent = text.slice(0, 1200);
+                        }
+                    })
+                    .catch(() => {
+                        pre.textContent = 'unable to load preview';
+                    });
+            } else {
+                const code = document.createElement('code');
+                if (kind === 'text' && item.preview_text) {
+                    code.textContent = item.preview_text;
+                } else {
+                    code.textContent = `${item.content_type} · ${formatBytes(item.content_length)}`;
+                }
+                card.appendChild(code);
+            }
+
+            const footer = document.createElement('footer');
+            const addr = document.createElement('span');
+            addr.textContent = truncateAddress(item.sender);
+            footer.appendChild(addr);
+            if (item.block_height) {
+                const height = document.createElement('span');
+                height.textContent = `h${formatNumber(item.block_height)}`;
+                footer.appendChild(height);
+            }
+            card.appendChild(footer);
+
+            this.grid.appendChild(card);
         });
     }
 }
@@ -299,4 +363,14 @@ customElements.define('zord-status', ZordStatus);
         const delta = target.dataset.action === 'next' ? 1 : -1;
         element.go(delta);
     });
+
+    const typeFilter = document.getElementById('type-filter');
+    if (typeFilter) {
+        typeFilter.addEventListener('change', (event) => {
+            const feed = document.querySelector('inscription-feed');
+            if (feed && typeof feed.setTypeFilter === 'function') {
+                feed.setTypeFilter(event.target.value);
+            }
+        });
+    }
 })();

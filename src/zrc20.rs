@@ -41,7 +41,7 @@ impl Zrc20Engine {
             Ok(op) => op,
             Err(e) => {
                 tracing::debug!("ZRC-20 validation failed: {}", e);
-                return Err(e); // Return error so it gets logged by indexer
+                return Err(e); // bubble up so the caller logs the failure
             }
         };
 
@@ -56,33 +56,33 @@ impl Zrc20Engine {
 
     /// Strict BRC-20 validation
     fn parse_and_validate(&self, content: &str) -> Result<Zrc20Operation> {
-        // Must be valid JSON (not JSON5, no trailing commas)
+        // Payloads must be strict JSON
         let op: Zrc20Operation = serde_json::from_str(content.trim())?;
 
-        // Protocol must be "zrc-20" (case-sensitive for p field)
-        if op.p != "zrc-20" {
+        // Protocol marker must normalize to zrc-20
+        if op.p.to_lowercase() != "zrc-20" {
             return Err(anyhow::anyhow!("Invalid protocol"));
         }
 
-        // Op must be lowercase
+        // Canonical op codes are lowercase
         if op.op != op.op.to_lowercase() {
             return Err(anyhow::anyhow!("Op must be lowercase"));
         }
 
-        // Normalize ticker to lowercase (BRC-20 is case-insensitive)
+        // Tick comparison uses lowercase to avoid duplicates
         let normalized_tick = op.tick.to_lowercase();
 
-        // Validate ticker byte length (4-5 bytes UTF-8)
+        // Enforce BRC/ZRC ticker length limits
         let tick_bytes = normalized_tick.as_bytes().len();
         if tick_bytes < 4 || tick_bytes > 5 {
             return Err(anyhow::anyhow!("Ticker must be 4-5 bytes"));
         }
 
-        // Update the operation with normalized ticker
+        // Persist the normalized ticker back into the struct
         let mut op = op;
         op.tick = normalized_tick;
 
-        // Validate numeric fields are strings and properly formatted
+        // Numeric fields must be strings with optional fractional parts
         if let Some(ref max) = op.max {
             self.validate_numeric_string(max, &op.dec)?;
         }
@@ -100,33 +100,33 @@ impl Zrc20Engine {
     }
 
     fn validate_numeric_string(&self, value: &str, dec: &Option<String>) -> Result<()> {
-        // Empty string is invalid
+        // Reject empty strings
         if value.is_empty() {
             return Err(anyhow::anyhow!("Empty numeric string"));
         }
 
-        // 0 is invalid (except for dec field, handled separately)
+        // Treat literal 0 as invalid for value fields (decimals handled separately)
         if value == "0" {
             return Err(anyhow::anyhow!("Zero is invalid for this field"));
         }
 
-        // Must contain only digits and at most one dot
+        // Allow digits plus a single decimal point
         let dot_count = value.chars().filter(|&c| c == '.').count();
         if dot_count > 1 {
             return Err(anyhow::anyhow!("Multiple dots in numeric string"));
         }
 
-        // Cannot start or end with dot
+        // Strip obvious malformed inputs
         if value.starts_with('.') || value.ends_with('.') {
             return Err(anyhow::anyhow!("Numeric string cannot start/end with dot"));
         }
 
-        // All characters must be digits or dot
+        // ASCII-only numbers are accepted
         if !value.chars().all(|c| c.is_ascii_digit() || c == '.') {
             return Err(anyhow::anyhow!("Invalid characters in numeric string"));
         }
 
-        // Check decimal precision
+        // Enforce declared decimal precision if a fractional part is present
         if let Some(dot_pos) = value.find('.') {
             let decimal_places = value.len() - dot_pos - 1;
             let max_decimals = if let Some(d) = dec {
@@ -140,7 +140,7 @@ impl Zrc20Engine {
             }
         }
 
-        // Check max value (uint64_max)
+        // Guard against values exceeding u64 once scaled
         let _numeric_value: u64 = value
             .replace('.', "")
             .parse()
@@ -150,17 +150,17 @@ impl Zrc20Engine {
     }
 
     fn validate_decimals(&self, dec: &str) -> Result<()> {
-        // Dec can be 0
+        // Decimals may be zero
         if dec.is_empty() {
             return Err(anyhow::anyhow!("Empty decimals string"));
         }
 
-        // Must be only digits
+        // Decimal field must be numeric
         if !dec.chars().all(|c| c.is_ascii_digit()) {
             return Err(anyhow::anyhow!("Decimals must be digits only"));
         }
 
-        // Max 18
+        // BRC/ZRC cap decimals at 18
         let dec_value: u8 = dec
             .parse()
             .map_err(|_| anyhow::anyhow!("Invalid decimals value"))?;
@@ -179,8 +179,8 @@ impl Zrc20Engine {
         deployer: &str,
     ) -> Result<()> {
         let max = op.max.as_ref().ok_or(anyhow::anyhow!("Missing max"))?;
-        let lim = op.lim.as_ref().unwrap_or(max); // If lim not set, equals max
-        let dec = op.dec.as_ref().map(|s| s.as_str()).unwrap_or("18"); // Default 18
+        let lim = op.lim.as_ref().unwrap_or(max); // default lim=max
+        let dec = op.dec.as_ref().map(|s| s.as_str()).unwrap_or("18"); // default decimals
 
         let token_info = serde_json::json!({
             "tick": op.tick.to_lowercase(),
@@ -212,7 +212,7 @@ impl Zrc20Engine {
     ) -> Result<()> {
         let amt_str = op.amt.as_ref().ok_or(anyhow::anyhow!("Missing amt"))?;
 
-        // Load token info to check limits
+        // Pull token metadata so we can enforce deployment limits
         let token_info_str = self
             .db
             .get_token_info(&op.tick.to_lowercase())?
@@ -233,7 +233,7 @@ impl Zrc20Engine {
         )?;
         let amt: u64 = self.parse_amount(amt_str, token_info["dec"].as_str().unwrap_or("18"))?;
 
-        // Validate mint amount
+        // Ensure mint fits within per-address limit and total supply
         if amt > lim {
             return Err(anyhow::anyhow!("Mint amount exceeds limit"));
         }
@@ -242,11 +242,11 @@ impl Zrc20Engine {
             return Err(anyhow::anyhow!("Max supply exceeded"));
         }
 
-        // Update supply
+        // Persist the higher supply figure
         self.db
             .update_token_supply(&op.tick.to_lowercase(), current_supply + amt)?;
 
-        // Increase both available and overall balance for minter
+        // Credit both spendable and overall balances for the minter
         self.db
             .update_balance(minter, &op.tick.to_lowercase(), amt as i64, amt as i64)?;
 
@@ -261,7 +261,7 @@ impl Zrc20Engine {
     ) -> Result<()> {
         let amt_str = op.amt.as_ref().ok_or(anyhow::anyhow!("Missing amt"))?;
 
-        // Get token decimals
+        // Normalize the requested transfer amount using token decimals
         let token_info_str = self
             .db
             .get_token_info(&op.tick.to_lowercase())?
@@ -269,13 +269,13 @@ impl Zrc20Engine {
         let token_info: serde_json::Value = serde_json::from_str(&token_info_str)?;
         let amt: u64 = self.parse_amount(amt_str, token_info["dec"].as_str().unwrap_or("18"))?;
 
-        // Check available balance
+        // Require unlocked balance before staging the transfer
         let balance = self.db.get_balance(sender, &op.tick.to_lowercase())?;
         if balance.available < amt {
             return Err(anyhow::anyhow!("Insufficient available balance"));
         }
 
-        // Create transfer inscription (locks the amount)
+        // Record the intent so the reveal can settle it later
         let transfer_data = serde_json::json!({
             "tick": op.tick.to_lowercase(),
             "amt": amt,
@@ -285,7 +285,7 @@ impl Zrc20Engine {
         self.db
             .create_transfer_inscription(inscription_id, &transfer_data.to_string())?;
 
-        // Decrease available balance (overall stays same)
+        // Lock the amount by reducing only the spendable balance
         self.db
             .update_balance(sender, &op.tick.to_lowercase(), -(amt as i64), 0)?;
 
@@ -293,12 +293,12 @@ impl Zrc20Engine {
     }
 
     fn handle_transfer_transfer(&self, inscription_id: &str, receiver: Option<&str>) -> Result<()> {
-        // Check if inscription is already used
+        // Prevent double-settlement of a transfer inscription
         if self.db.is_inscription_used(inscription_id)? {
             return Err(anyhow::anyhow!("Transfer inscription already used"));
         }
 
-        // Get transfer inscription data
+        // Load the staged transfer data
         let transfer_data_str = self
             .db
             .get_transfer_inscription(inscription_id)?
@@ -315,21 +315,19 @@ impl Zrc20Engine {
             .as_str()
             .ok_or(anyhow::anyhow!("Invalid sender"))?;
 
-        let receiver = receiver.unwrap_or(sender); // If sent to self, increase available balance
+        let receiver = receiver.unwrap_or(sender); // default to self when reveal spends locally
 
         if receiver == sender {
-            // Self-transfer: increase available balance
+            // Unlock the funds if they ultimately returned to sender
             self.db.update_balance(sender, tick, amt as i64, 0)?;
         } else {
-            // Transfer to another address
-            // Decrease sender's overall balance
+            // Move value to the receiver and debit the sender
             self.db.update_balance(sender, tick, 0, -(amt as i64))?;
-            // Increase receiver's both balances
             self.db
                 .update_balance(receiver, tick, amt as i64, amt as i64)?;
         }
 
-        // Mark inscription as used
+        // Flag the inscription so reveal cannot replay
         self.db.mark_inscription_used(inscription_id)?;
 
         Ok(())

@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Zord · Inscriptions</title>
+    <title>Zord · Inscription Index</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -22,10 +22,24 @@
     </header>
 
     <main>
-        <inscription-feed page-size="48"></inscription-feed>
-        <div class="pager">
-            <button data-target="inscriptions" data-action="prev">prev</button>
-            <button data-target="inscriptions" data-action="next">next</button>
+        <section class="controls">
+            <label>type <select id="type-filter">
+                <option value="all">all</option>
+                <option value="json">json</option>
+                <option value="text">text</option>
+                <option value="image">image</option>
+                <option value="binary">binary</option>
+            </select></label>
+            <div class="pager">
+                <button data-target="inscriptions" data-action="prev">prev</button>
+                <button data-target="inscriptions" data-action="next">next</button>
+            </div>
+        </section>
+
+        <inscription-feed page-size="48" data-filter="type"></inscription-feed>
+        <div class="legend">
+            <span class="flag shielded">shielded</span>
+            <span class="flag transparent">transparent</span>
         </div>
     </main>
 

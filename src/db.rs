@@ -1,7 +1,10 @@
 use anyhow::Result;
 use redb::{Database, ReadableTable, TableDefinition};
-use std::path::Path;
 use std::sync::Arc;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 // Table Definitions
 const BLOCKS: TableDefinition<u64, &str> = TableDefinition::new("blocks");
@@ -42,7 +45,14 @@ pub struct Balance {
 
 impl Db {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let db = Database::create(path)?;
+        let path = PathBuf::from(path.as_ref());
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        let db = Database::create(&path)?;
 
         let write_txn = db.begin_write()?;
         {

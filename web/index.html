@@ -3,85 +3,31 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Zord · Zcash Ordinals Index</title>
+    <title>Zord · Inscriptions</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <div class="page">
-        <header class="site-header">
-            <a class="brand" href="/">
-                <span class="brand-icon">Z</span>
-                <span class="brand-label">
-                    <strong>Zord</strong>
-                    <small>zatoshi.market</small>
-                </span>
-            </a>
-            <nav class="site-nav">
-                <a href="/" class="active">Inscriptions</a>
-                <a href="/tokens">ZRC-20</a>
-                <a href="/names">Names</a>
-            </nav>
-            <a class="site-link" href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index</a>
-        </header>
+    <header class="bar">
+        <nav>
+            <a href="/" class="active">inscriptions</a>
+            <a href="/tokens">zrc-20</a>
+            <a href="/names">names</a>
+            <a href="/docs">docs</a>
+            <a href="/spec">api</a>
+        </nav>
+        <zord-status></zord-status>
+    </header>
 
-        <section class="hero hero--home">
-            <div class="hero-copy">
-                <p class="eyebrow">Live Zcash Ord index</p>
-                <h1>Ord-compatible feed for rare & exotic zats</h1>
-                <p class="lede">Watch inscriptions stream in as blocks confirm, then dive into ZRC-20 supply and ZNS names without leaving the shell.</p>
-                <div class="hero-links">
-                    <a class="pill" href="/tokens">View tokens</a>
-                    <a class="pill pill-secondary" href="/names">Browse names</a>
-                </div>
-            </div>
-            <div class="hero-status">
-                <zord-status></zord-status>
-            </div>
-        </section>
-
-        <main class="content">
-            <section class="panel">
-                <div class="panel-header">
-                    <div>
-                        <p class="eyebrow">Latest blocks</p>
-                        <h2>Full-width inscription grid</h2>
-                        <p>Each tile matches Ord’s preview behavior with metadata, sender, and content hints.</p>
-                    </div>
-                    <div class="panel-actions">
-                        <button data-target="inscriptions" data-action="prev">Prev</button>
-                        <button data-target="inscriptions" data-action="next">Next</button>
-                    </div>
-                </div>
-                <inscription-feed page-size="36"></inscription-feed>
-            </section>
-
-            <section class="link-grid">
-                <a class="link-card" href="/tokens">
-                    <div>
-                        <p class="eyebrow">ZRC-20</p>
-                        <h3>Supply index</h3>
-                        <p>Track deploys, mint caps, and inscription anchors per ticker.</p>
-                    </div>
-                    <span>→</span>
-                </a>
-                <a class="link-card" href="/names">
-                    <div>
-                        <p class="eyebrow">ZNS</p>
-                        <h3>Name roll</h3>
-                        <p>Resolve .zec and .zcash handles with ownership context.</p>
-                    </div>
-                    <span>→</span>
-                </a>
-            </section>
-        </main>
-
-        <footer>
-            <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index.zatoshi.market</a>. Source released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.</p>
-        </footer>
-    </div>
+    <main>
+        <inscription-feed page-size="48"></inscription-feed>
+        <div class="pager">
+            <button data-target="inscriptions" data-action="prev">prev</button>
+            <button data-target="inscriptions" data-action="next">next</button>
+        </div>
+    </main>
 
     <script type="module" src="/static/app.js"></script>
 </body>

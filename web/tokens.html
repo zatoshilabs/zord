@@ -3,73 +3,41 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ZRC-20 Index · Zord</title>
+    <title>Zord · ZRC-20</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <div class="page">
-        <header class="site-header">
-            <a class="brand" href="/">
-                <span class="brand-icon">Z</span>
-                <span class="brand-label">
-                    <strong>Zord</strong>
-                    <small>zatoshi.market</small>
-                </span>
-            </a>
-            <nav class="site-nav">
-                <a href="/">Inscriptions</a>
-                <a href="/tokens" class="active">ZRC-20</a>
-                <a href="/names">Names</a>
-            </nav>
-            <a class="site-link" href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index</a>
-        </header>
+    <header class="bar">
+        <nav>
+            <a href="/">inscriptions</a>
+            <a href="/tokens" class="active">zrc-20</a>
+            <a href="/names">names</a>
+            <a href="/docs">docs</a>
+            <a href="/spec">api</a>
+        </nav>
+        <zord-status></zord-status>
+    </header>
 
-        <section class="hero">
-            <div class="hero-copy">
-                <p class="eyebrow">Stacks on zats</p>
-                <h1>ZRC-20 supply dashboard</h1>
-                <p class="lede">Follow deploys, caps, mint velocity, and inscription anchors in the same shell that powers the inscription feed.</p>
-            </div>
-            <div class="hero-status">
-                <zord-status></zord-status>
-            </div>
-        </section>
-
-        <main class="content">
-            <section class="panel">
-                <div class="panel-header">
-                    <div>
-                        <p class="eyebrow">Registry</p>
-                        <h2>Token list</h2>
-                        <p>Search tickers, inspect mint limits, and jump to the genesis inscription.</p>
-                    </div>
-                </div>
-                <div class="search-bar">
-                    <input type="text" id="token-search" placeholder="Search tokens by ticker…" autocomplete="off">
-                </div>
-                <token-table page-size="100" id="token-list"></token-table>
-            </section>
-        </main>
-
-        <footer>
-            <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index.zatoshi.market</a>. Source released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.</p>
-        </footer>
-    </div>
+    <main>
+        <div class="search">
+            <input id="token-search" type="text" placeholder="filter tickers" autocomplete="off">
+        </div>
+        <token-table page-size="120" id="token-list"></token-table>
+    </main>
 
     <script type="module" src="/static/app.js"></script>
     <script>
-        const searchInput = document.getElementById('token-search');
-        const tokenTable = document.getElementById('token-list');
-        let debounceTimer;
-
-        searchInput.addEventListener('input', (event) => {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                tokenTable.setAttribute('search-query', event.target.value.trim());
-            }, 250);
+        const input = document.getElementById('token-search');
+        const table = document.getElementById('token-list');
+        let timer;
+        input.addEventListener('input', (event) => {
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+                table.setAttribute('search-query', event.target.value.trim());
+            }, 200);
         });
     </script>
 </body>

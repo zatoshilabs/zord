@@ -204,20 +204,14 @@ async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) 
         };
 
         format!(
-            r#"<div class=\"preview-frame image\">
-    <img src=\"/content/{id}\" alt=\"Inscription {short}\" loading=\"lazy\" style=\"image-rendering: {rendering};\">
-</div>
-<p class=\"preview-caption\"><a href=\"/content/{id}\" target=\"_blank\" rel=\"noreferrer\">Download raw file</a></p>"#,
+            r#"<div class=\"preview-box\"><img src=\"/content/{id}\" alt=\"{short}\" loading=\"lazy\" style=\"image-rendering:{rendering};\"></div>"#,
             id = id_attr,
             short = short_id,
             rendering = rendering,
         )
     } else if content_type_raw == "text/html" {
         format!(
-            r#"<div class=\"preview-frame html\">
-    <iframe src=\"/content/{id}\" title=\"Inscription {short}\" loading=\"lazy\"></iframe>
-</div>
-<p class=\"preview-caption\"><a href=\"/content/{id}\" target=\"_blank\" rel=\"noreferrer\">Open in new tab</a></p>"#,
+            r#"<div class=\"preview-box\"><iframe src=\"/content/{id}\" title=\"{short}\" loading=\"lazy\"></iframe></div>"#,
             id = id_attr,
             short = short_id,
         )
@@ -232,18 +226,13 @@ async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) 
         };
 
         format!(
-            r#"<div class=\"preview-frame text\">
-    <pre>{}</pre>
-</div>"#,
+            r#"<div class=\"preview-box\"><pre>{}</pre></div>"#,
             html_escape::encode_text(&formatted)
         )
     } else {
         format!(
-            r#"<div class=\"preview-frame binary\">
-    <p class=\"preview-hint\">Binary content ({})</p>
-    <a href=\"/content/{}\" class=\"pill\" target=\"_blank\" rel=\"noreferrer\">Download raw</a>
-</div>"#,
-            size_display, id_attr
+            r#"<div class=\"preview-box\"><div>Binary ({})</div></div>"#,
+            size_display
         )
     };
 
@@ -310,55 +299,27 @@ async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) 
     <title>Inscription {short}</title>
     <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
     <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>
-    <link href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap\" rel=\"stylesheet\">
+    <link href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap\" rel=\"stylesheet\">
     <link rel=\"stylesheet\" href=\"/static/styles.css\">
 </head>
 <body>
-    <div class=\"page\">
-        <header class=\"site-header\">
-            <a class=\"brand\" href=\"/\">
-                <span class=\"brand-icon\">Z</span>
-                <span class=\"brand-label\">
-                    <strong>Zord</strong>
-                    <small>zatoshi.market</small>
-                </span>
-            </a>
-            <nav class=\"site-nav\">
-                <a href=\"/\">Inscriptions</a>
-                <a href=\"/tokens\">ZRC-20</a>
-                <a href=\"/names\">Names</a>
-            </nav>
-            <a class=\"site-link\" href=\"https://index.zatoshi.market\" target=\"_blank\" rel=\"noreferrer\">index</a>
-        </header>
+    <header class=\"bar\">
+        <nav>
+            <a href=\"/\" class=\"active\">inscriptions</a>
+            <a href=\"/tokens\">zrc-20</a>
+            <a href=\"/names\">names</a>
+            <a href=\"/docs\">docs</a>
+            <a href=\"/spec\">api</a>
+        </nav>
+        <zord-status></zord-status>
+    </header>
 
-        <section class=\"hero\">
-            <div class=\"hero-copy\">
-                <p class=\"eyebrow\">Inscription</p>
-                <h1>{short}</h1>
-                <p class=\"lede\">Ord-compatible metadata rendered inside the Zord shell.</p>
-            </div>
-            <div class=\"hero-status\">
-                <zord-status></zord-status>
-            </div>
-        </section>
-
-        <main class=\"content\">
-            <section class=\"panel inscription-detail\">
-                <div class=\"preview-stack\">
-                    <p class=\"eyebrow\">Preview</p>
-                    {preview}
-                </div>
-                <div class=\"detail-meta\">
-                    <p class=\"eyebrow\">Metadata</p>
-                    {rows}
-                </div>
-            </section>
-        </main>
-
-        <footer>
-            <p>Built for the Zatoshi index at <a href=\"https://index.zatoshi.market\" target=\"_blank\" rel=\"noreferrer\">index.zatoshi.market</a>. Source released under <a href=\"https://creativecommons.org/publicdomain/zero/1.0/\" target=\"_blank\" rel=\"noreferrer\">CC0-1.0</a>.</p>
-        </footer>
-    </div>
+    <main class=\"detail\">
+        {preview}
+        <div class=\"meta-list\">
+            {rows}
+        </div>
+    </main>
 
     <script type=\"module\" src=\"/static/app.js\"></script>
 </body>

@@ -94,7 +94,7 @@ class InscriptionFeed extends PaginatedComponent {
     setup() {
         super.setup();
         this.grid = document.createElement('div');
-        this.grid.className = 'z-grid';
+        this.grid.className = 'grid';
         this.container.appendChild(this.grid);
     }
 
@@ -113,50 +113,27 @@ class InscriptionFeed extends PaginatedComponent {
         this.grid.innerHTML = '';
 
         items.forEach((item) => {
-            const card = document.createElement('article');
-            card.className = 'z-card';
+            const fig = document.createElement('figure');
+            fig.className = 'insc';
 
             const frame = document.createElement('iframe');
             frame.src = `/preview/${item.id}`;
-            frame.title = `Inscription ${item.id}`;
+            frame.title = item.id;
             frame.loading = 'lazy';
             frame.setAttribute('sandbox', 'allow-scripts');
-            card.appendChild(frame);
+            fig.appendChild(frame);
 
-            const heading = document.createElement('h3');
+            const caption = document.createElement('figcaption');
             const link = document.createElement('a');
             link.href = `/inscription/${item.id}`;
-            link.textContent = `${item.id.slice(0, 12)}…`;
-            heading.appendChild(link);
-            card.appendChild(heading);
-
-            const description = document.createElement('p');
-            description.textContent = item.preview_text
-                || `${item.content_type} · ${formatBytes(item.content_length)}`;
-            card.appendChild(description);
+            link.textContent = item.id.slice(0, 10) + '…';
+            caption.appendChild(link);
 
             const meta = document.createElement('div');
-            meta.className = 'z-meta';
-
-            const senderRow = document.createElement('div');
-            senderRow.className = 'meta-row';
-            senderRow.innerHTML = `<span>Sender</span><strong>${truncateAddress(item.sender)}</strong>`;
-            meta.appendChild(senderRow);
-
-            const typeRow = document.createElement('div');
-            typeRow.className = 'meta-row';
-            typeRow.innerHTML = `<span>${item.content_type}</span><strong>${formatBytes(item.content_length)}</strong>`;
-            meta.appendChild(typeRow);
-
-            if (item.block_height) {
-                const blockRow = document.createElement('div');
-                blockRow.className = 'meta-row';
-                blockRow.innerHTML = `<span>Height</span><strong>${formatNumber(item.block_height)}</strong>`;
-                meta.appendChild(blockRow);
-            }
-
-            card.appendChild(meta);
-            this.grid.appendChild(card);
+            meta.innerText = `${item.content_type} · ${formatBytes(item.content_length)} · ${truncateAddress(item.sender)}${item.block_height ? ' · ' + formatNumber(item.block_height) : ''}`;
+            fig.appendChild(caption);
+            fig.appendChild(meta);
+            this.grid.appendChild(fig);
         });
     }
 }

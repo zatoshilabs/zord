@@ -12,6 +12,8 @@ COPY src ./src
 
 # Copy web assets so build-time `include_str!` works
 COPY web ./web
+# Fail fast with a clear message if the frontend bundle is missing
+RUN test -f web/index.html
 
 # Install build dependencies
 RUN apt-get update && \

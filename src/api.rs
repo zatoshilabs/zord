@@ -2,10 +2,11 @@ use crate::db::Db;
 use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{Html, IntoResponse, Response},
     routing::get,
     Json, Router,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
@@ -147,21 +148,27 @@ async fn get_recent_inscriptions(State(state): State<AppState>) -> Json<serde_js
 async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let meta = match state.db.get_inscription(&id).unwrap_or(None) {
         Some(m) => m,
-        None => return Html(r#"<!DOCTYPE html>
+        None => {
+            return Html(
+                r#"<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>Inscription Not Found</title>
     <style>
-        body { font-family: monospace; background: #111; color: #fff; padding: 40px; text-align: center; }
-        a { color: #fff; }
+        body { font-family: monospace; background: #020204; color: #fff; padding: 40px; text-align: center; }
+        a { color: #ffc837; text-decoration: none; }
     </style>
 </head>
 <body>
     <h1>Inscription Not Found</h1>
-    <a href="/">← Back to inscriptions</a>
+    <a href="/">← Back to index</a>
 </body>
-</html>"#).into_response(),
+</html>"#
+                .to_string(),
+            )
+            .into_response()
+        }
     };
 
     let val: serde_json::Value = match serde_json::from_str(&meta) {
@@ -173,190 +180,192 @@ async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) 
     let content = val["content"].as_str().unwrap_or("");
     let content_hex = val["content_hex"].as_str().unwrap_or("");
     let sender_raw = val["sender"].as_str().unwrap_or("unknown");
+    let receiver_raw = val["receiver"].as_str().unwrap_or("unknown");
     let txid_raw = val["txid"].as_str().unwrap_or("");
+    let block_height = val["block_height"].as_u64();
+    let block_time = val["block_time"].as_u64();
 
     let sender = html_escape::encode_text(sender_raw).to_string();
+    let receiver = html_escape::encode_text(receiver_raw).to_string();
     let txid = html_escape::encode_text(txid_raw).to_string();
     let content_type = html_escape::encode_text(content_type_raw).to_string();
     let id_text = html_escape::encode_text(&id).to_string();
     let id_attr = html_escape::encode_double_quoted_attribute(&id).to_string();
     let short_id: String = id_text.chars().take(16).collect();
+    let content_length_bytes = content_hex.len() / 2;
+    let size_display = format_byte_size(content_length_bytes);
+    let timestamp_display = block_time.map(format_timestamp).unwrap_or_else(|| "—".into());
 
-    // Render content preview based on type (following Ordinals rendering standards)
     let content_preview = if content_type_raw.starts_with("image/") {
-        // Determine image-rendering based on format
-        let rendering = if content_type_raw == "image/avif" || content_type_raw == "image/jxl" {
+        let rendering = if matches!(content_type_raw, "image/avif" | "image/jxl") {
             "auto"
         } else {
-            // For pixel art and most images, use pixelated for upscaling
             "pixelated"
         };
 
         format!(
-            r#"<div class="content-preview">
-            <div class="image-container">
-                <img src="/content/{}" class="inscription-image" style="image-rendering: {};">
-            </div>
-            <div style="margin-top: 10px; color: #999; font-size: 0.9em;">
-                <a href="/content/{}" target="_blank" style="color: #999;">view full size</a>
-            </div>
-        </div>"#,
-            id_attr, rendering, id_attr
+            r#"<div class=\"preview-frame image\">
+    <img src=\"/content/{id}\" alt=\"Inscription {short}\" loading=\"lazy\" style=\"image-rendering: {rendering};\">
+</div>
+<p class=\"preview-caption\"><a href=\"/content/{id}\" target=\"_blank\" rel=\"noreferrer\">Download raw file</a></p>"#,
+            id = id_attr,
+            short = short_id,
+            rendering = rendering,
         )
-    } else if content_type_raw == "application/json" {
-        let formatted = serde_json::to_string_pretty(
-            &serde_json::from_str::<serde_json::Value>(content).unwrap_or_default(),
-        )
-        .unwrap_or_else(|_| content.to_string());
+    } else if content_type_raw == "text/html" {
         format!(
-            r#"<div class="content-preview">
-            <pre>{}</pre>
-        </div>"#,
+            r#"<div class=\"preview-frame html\">
+    <iframe src=\"/content/{id}\" title=\"Inscription {short}\" loading=\"lazy\"></iframe>
+</div>
+<p class=\"preview-caption\"><a href=\"/content/{id}\" target=\"_blank\" rel=\"noreferrer\">Open in new tab</a></p>"#,
+            id = id_attr,
+            short = short_id,
+        )
+    } else if content_type_raw.starts_with("text/") || content_type_raw == "application/json" {
+        let formatted = if content_type_raw == "application/json" {
+            serde_json::from_str::<serde_json::Value>(content)
+                .ok()
+                .and_then(|value| serde_json::to_string_pretty(&value).ok())
+                .unwrap_or_else(|| content.to_string())
+        } else {
+            content.to_string()
+        };
+
+        format!(
+            r#"<div class=\"preview-frame text\">
+    <pre>{}</pre>
+</div>"#,
             html_escape::encode_text(&formatted)
         )
-    } else if content_type_raw.starts_with("text/") {
-        format!(
-            r#"<div class="content-preview">
-            <pre>{}</pre>
-        </div>"#,
-            html_escape::encode_text(content)
-        )
     } else {
-        let size = content_hex.len() / 2;
         format!(
-            r#"<div class="content-preview">
-            <p style="color: #999;">Binary content ({} bytes)</p>
-            <a href="/content/{}" class="button">Download</a>
-        </div>"#,
-            size, id_attr
+            r#"<div class=\"preview-frame binary\">
+    <p class=\"preview-hint\">Binary content ({})</p>
+    <a href=\"/content/{}\" class=\"pill\" target=\"_blank\" rel=\"noreferrer\">Download raw</a>
+</div>"#,
+            size_display, id_attr
         )
     };
 
+    let block_link = block_height
+        .map(|h| format!("<a href=\"/block/{h}\">{h}</a>"))
+        .unwrap_or_else(|| "—".into());
+    let tx_link = if txid_raw.is_empty() {
+        "—".to_string()
+    } else {
+        format!("<a href=\"/tx/{tx}\">{tx}</a>", tx = txid)
+    };
+    let preview_link = format!("<a href=\"/preview/{id}\" target=\"_blank\" rel=\"noreferrer\">Open preview</a>", id = id_attr);
+    let content_link = format!("<a href=\"/content/{id}\" target=\"_blank\" rel=\"noreferrer\">Download raw</a>", id = id_attr);
+
+    let mut rows = Vec::new();
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>ID</span><strong><code>{}</code></strong></div>"#,
+        id_text
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Content type</span><strong>{}</strong></div>"#,
+        content_type
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Size</span><strong>{}</strong></div>"#,
+        size_display
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Sender</span><strong><code>{}</code></strong></div>"#,
+        sender
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Receiver</span><strong><code>{}</code></strong></div>"#,
+        receiver
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Block height</span><strong>{}</strong></div>"#,
+        block_link
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Timestamp</span><strong>{}</strong></div>"#,
+        timestamp_display
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Transaction</span><strong>{}</strong></div>"#,
+        tx_link
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Preview</span><strong>{}</strong></div>"#,
+        preview_link
+    ));
+    rows.push(format!(
+        r#"<div class=\"meta-row\"><span>Content</span><strong>{}</strong></div>"#,
+        content_link
+    ));
+    let meta_rows = rows.join("\n");
+
     let html = format!(
         r#"<!DOCTYPE html>
-<html>
+<html lang=\"en\">
 <head>
-    <meta charset="utf-8">
-    <title>Inscription {}</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: monospace;
-            background: #111;
-            color: #fff;
-            padding: 40px 20px;
-            line-height: 1.6;
-        }}
-        .container {{ max-width: 1000px; margin: 0 auto; }}
-        .back-link {{
-            color: #999;
-            text-decoration: none;
-            display: inline-block;
-            margin-bottom: 30px;
-            transition: color 0.2s;
-        }}
-        .back-link:hover {{ color: #fff; }}
-        h1 {{
-            font-size: 1.5em;
-            margin-bottom: 30px;
-            word-break: break-all;
-        }}
-        .meta {{
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 30px;
-        }}
-        .meta-row {{
-            display: flex;
-            padding: 10px 0;
-            border-bottom: 1px solid #333;
-        }}
-        .meta-row:last-child {{ border-bottom: none; }}
-        .meta-label {{
-            color: #999;
-            min-width: 120px;
-        }}
-        .meta-value {{
-            color: #fff;
-            word-break: break-all;
-        }}
-        .content-preview {{
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px;
-            padding: 20px;
-        }}
-        .image-container {{
-            width: 576px;
-            height: 576px;
-            max-width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #0a0a0a;
-            border-radius: 4px;
-            overflow: hidden;
-        }}
-        .inscription-image {{
-            max-width: 100%;
-            max-height: 100%;
-            width: auto;
-            height: auto;
-            display: block;
-        }}
-        pre {{
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            background: #0a0a0a;
-            padding: 15px;
-            border-radius: 4px;
-            overflow-x: auto;
-        }}
-        .button {{
-            display: inline-block;
-            padding: 10px 20px;
-            background: #333;
-            color: #fff;
-            text-decoration: none;
-            border-radius: 4px;
-            margin-top: 10px;
-            transition: background 0.2s;
-        }}
-        .button:hover {{ background: #444; }}
-    </style>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>Inscription {short}</title>
+    <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
+    <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>
+    <link href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap\" rel=\"stylesheet\">
+    <link rel=\"stylesheet\" href=\"/static/styles.css\">
 </head>
 <body>
-    <div class="container">
-        <a href="/" class="back-link">← back</a>
+    <div class=\"page\">
+        <header class=\"site-header\">
+            <a class=\"brand\" href=\"/\">
+                <span class=\"brand-icon\">Z</span>
+                <span class=\"brand-label\">
+                    <strong>Zord</strong>
+                    <small>zatoshi.market</small>
+                </span>
+            </a>
+            <nav class=\"site-nav\">
+                <a href=\"/\">Inscriptions</a>
+                <a href=\"/tokens\">ZRC-20</a>
+                <a href=\"/names\">Names</a>
+            </nav>
+            <a class=\"site-link\" href=\"https://index.zatoshi.market\" target=\"_blank\" rel=\"noreferrer\">index</a>
+        </header>
 
-        <h1>Inscription {}</h1>
+        <section class=\"hero\">
+            <div class=\"hero-copy\">
+                <p class=\"eyebrow\">Inscription</p>
+                <h1>{short}</h1>
+                <p class=\"lede\">Ord-compatible metadata rendered inside the Zord shell.</p>
+            </div>
+            <div class=\"hero-status\">
+                <zord-status></zord-status>
+            </div>
+        </section>
 
-        {}
+        <main class=\"content\">
+            <section class=\"panel inscription-detail\">
+                <div class=\"preview-stack\">
+                    <p class=\"eyebrow\">Preview</p>
+                    {preview}
+                </div>
+                <div class=\"detail-meta\">
+                    <p class=\"eyebrow\">Metadata</p>
+                    {rows}
+                </div>
+            </section>
+        </main>
 
-        <div class="meta">
-            <div class="meta-row">
-                <div class="meta-label">id</div>
-                <div class="meta-value">{}</div>
-            </div>
-            <div class="meta-row">
-                <div class="meta-label">content type</div>
-                <div class="meta-value">{}</div>
-            </div>
-            <div class="meta-row">
-                <div class="meta-label">owner</div>
-                <div class="meta-value">{}</div>
-            </div>
-            <div class="meta-row">
-                <div class="meta-label">genesis transaction</div>
-                <div class="meta-value">{}</div>
-            </div>
-        </div>
+        <footer>
+            <p>Built for the Zatoshi index at <a href=\"https://index.zatoshi.market\" target=\"_blank\" rel=\"noreferrer\">index.zatoshi.market</a>. Source released under <a href=\"https://creativecommons.org/publicdomain/zero/1.0/\" target=\"_blank\" rel=\"noreferrer\">CC0-1.0</a>.</p>
+        </footer>
     </div>
+
+    <script type=\"module\" src=\"/static/app.js\"></script>
 </body>
 </html>"#,
-        short_id, id_text, content_preview, id_text, content_type, sender, txid
+        short = short_id,
+        preview = content_preview,
+        rows = meta_rows
     );
 
     Html(html).into_response()
@@ -885,6 +894,29 @@ fn parse_decimal_amount(amount_str: &str, decimals: u32) -> Result<u128, std::nu
     } else {
         let whole: u128 = amount_str.parse()?;
         Ok(whole * 10u128.pow(decimals))
+    }
+}
+
+fn format_byte_size(bytes: usize) -> String {
+    const UNITS: [&str; 4] = ["bytes", "KB", "MB", "GB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{:.0} {}", size, UNITS[unit])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit])
+    }
+}
+
+fn format_timestamp(ts: u64) -> String {
+    if let Some(datetime) = DateTime::<Utc>::from_timestamp(ts as i64, 0) {
+        datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+    } else {
+        ts.to_string()
     }
 }
 

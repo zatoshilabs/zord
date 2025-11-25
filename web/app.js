@@ -4,6 +4,34 @@ const targetSelectors = {
     names: 'name-table',
 };
 
+const numberFormatter = new Intl.NumberFormat('en-US');
+
+const formatNumber = (value) => {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return '—';
+    }
+    return numberFormatter.format(value);
+};
+
+const formatBytes = (bytes) => {
+    if (!bytes && bytes !== 0) return '—';
+    const units = ['bytes', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+        size /= 1024;
+        unit += 1;
+    }
+    const precise = unit === 0 ? Math.round(size) : Number(size.toFixed(size < 10 ? 1 : 0));
+    return `${precise} ${units[unit]}`;
+};
+
+const truncateAddress = (value = '', head = 6, tail = 4) => {
+    if (!value) return 'unknown';
+    if (value.length <= head + tail + 3) return value;
+    return `${value.slice(0, head)}…${value.slice(-tail)}`;
+};
+
 class PaginatedComponent extends HTMLElement {
     connectedCallback() {
         this.page = 0;
@@ -75,41 +103,59 @@ class InscriptionFeed extends PaginatedComponent {
     }
 
     render(items) {
-        this.grid.innerHTML = '';
         if (!items.length) {
             this.setPlaceholder('No inscriptions yet', 'empty');
             return;
         }
+
+        this.container.innerHTML = '';
+        this.container.appendChild(this.grid);
+        this.grid.innerHTML = '';
+
         items.forEach((item) => {
             const card = document.createElement('article');
             card.className = 'z-card';
 
-            const body = document.createElement('p');
-            if (item.preview_text) {
-                body.textContent = item.preview_text;
-            } else if (item.content_type.startsWith('image/')) {
-                body.textContent = 'Image inscription';
-            } else {
-                body.textContent = `${item.content_type} · ${item.content_length} bytes`;
-            }
-            card.appendChild(body);
+            const frame = document.createElement('iframe');
+            frame.src = `/preview/${item.id}`;
+            frame.title = `Inscription ${item.id}`;
+            frame.loading = 'lazy';
+            frame.setAttribute('sandbox', 'allow-scripts');
+            card.appendChild(frame);
+
+            const heading = document.createElement('h3');
+            const link = document.createElement('a');
+            link.href = `/inscription/${item.id}`;
+            link.textContent = `${item.id.slice(0, 12)}…`;
+            heading.appendChild(link);
+            card.appendChild(heading);
+
+            const description = document.createElement('p');
+            description.textContent = item.preview_text
+                || `${item.content_type} · ${formatBytes(item.content_length)}`;
+            card.appendChild(description);
 
             const meta = document.createElement('div');
-            meta.className = 'z-grid-meta';
-            const idLink = document.createElement('a');
-            idLink.href = `/inscription/${item.id}`;
-            idLink.textContent = `${item.id.slice(0, 8)}…`;
-            meta.appendChild(idLink);
+            meta.className = 'z-meta';
 
-            const type = document.createElement('span');
-            type.textContent = item.content_type;
-            meta.appendChild(type);
+            const senderRow = document.createElement('div');
+            senderRow.className = 'meta-row';
+            senderRow.innerHTML = `<span>Sender</span><strong>${truncateAddress(item.sender)}</strong>`;
+            meta.appendChild(senderRow);
+
+            const typeRow = document.createElement('div');
+            typeRow.className = 'meta-row';
+            typeRow.innerHTML = `<span>${item.content_type}</span><strong>${formatBytes(item.content_length)}</strong>`;
+            meta.appendChild(typeRow);
+
+            if (item.block_height) {
+                const blockRow = document.createElement('div');
+                blockRow.className = 'meta-row';
+                blockRow.innerHTML = `<span>Height</span><strong>${formatNumber(item.block_height)}</strong>`;
+                meta.appendChild(blockRow);
+            }
+
             card.appendChild(meta);
-
-            const sender = document.createElement('p');
-            sender.textContent = `from ${item.sender.slice(0, 12)}…`;
-            card.appendChild(sender);
-
             this.grid.appendChild(card);
         });
     }
@@ -137,10 +183,13 @@ class TokenTable extends PaginatedComponent {
             this.setPlaceholder('No tokens deployed', 'empty');
             return;
         }
+
+        this.container.innerHTML = '';
+        this.container.appendChild(this.table);
         items.forEach((token) => {
             const row = document.createElement('tr');
             const ticker = document.createElement('td');
-            ticker.textContent = token.ticker;
+            ticker.textContent = token.ticker.toUpperCase();
             row.appendChild(ticker);
 
             const supply = document.createElement('td');
@@ -188,11 +237,14 @@ class NameTable extends PaginatedComponent {
     }
 
     render(items) {
-        this.list.innerHTML = '';
         if (!items.length) {
             this.setPlaceholder('No names registered', 'empty');
             return;
         }
+
+        this.container.innerHTML = '';
+        this.container.appendChild(this.list);
+        this.list.innerHTML = '';
         items.forEach((entry) => {
             const li = document.createElement('li');
             const name = document.createElement('strong');
@@ -200,7 +252,7 @@ class NameTable extends PaginatedComponent {
             li.appendChild(name);
 
             const owner = document.createElement('span');
-            owner.textContent = entry.owner.slice(0, 12) + '…';
+            owner.textContent = truncateAddress(entry.owner);
             li.appendChild(owner);
 
             const link = document.createElement('a');

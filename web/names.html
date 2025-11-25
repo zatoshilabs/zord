@@ -1,54 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Names · Zord</title>
+    <title>ZNS Roll · Zord</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-
 <body>
-    <header class="hero small">
-        <div>
-            <p class="tag"><a href="/" style="color: inherit; text-decoration: none;">← Back to Index</a></p>
-            <h1>ZNS Names</h1>
-        </div>
-        <zord-status></zord-status>
-    </header>
+    <div class="page">
+        <header class="site-header">
+            <a class="brand" href="/">
+                <span class="brand-icon">Z</span>
+                <span class="brand-label">
+                    <strong>Zord</strong>
+                    <small>zatoshi.market</small>
+                </span>
+            </a>
+            <nav class="site-nav">
+                <a href="/">Inscriptions</a>
+                <a href="/tokens">ZRC-20</a>
+                <a href="/names" class="active">Names</a>
+            </nav>
+            <a class="site-link" href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index</a>
+        </header>
 
-    <main>
-        <section>
-            <div class="search-bar">
-                <input type="text" id="name-search" placeholder="Search names (e.g. satoshi.zec)..." autocomplete="off">
+        <section class="hero">
+            <div class="hero-copy">
+                <p class="eyebrow">ZNS roll</p>
+                <h1>.zec & .zcash namespace explorer</h1>
+                <p class="lede">Resolve names, owners, and origin inscriptions with Ord-style context.</p>
             </div>
-
-            <name-table page-size="100" id="name-list"></name-table>
+            <div class="hero-status">
+                <zord-status></zord-status>
+            </div>
         </section>
-    </main>
 
-    <footer>
-        <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank"
-                rel="noreferrer">index.zatoshi.market</a>. Source released under <a
-                href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.
-        </p>
-    </footer>
+        <main class="content">
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <p class="eyebrow">Directory</p>
+                        <h2>Name list</h2>
+                        <p>Filter by handle and jump straight to the inscription that minted it.</p>
+                    </div>
+                </div>
+                <div class="search-bar">
+                    <input type="text" id="name-search" placeholder="Search names (e.g. satoshi.zec)…" autocomplete="off">
+                </div>
+                <name-table page-size="100" id="name-list"></name-table>
+            </section>
+        </main>
+
+        <footer>
+            <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index.zatoshi.market</a>. Source released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.</p>
+        </footer>
+    </div>
 
     <script type="module" src="/static/app.js"></script>
     <script>
-        // Simple search handler
         const searchInput = document.getElementById('name-search');
         const nameTable = document.getElementById('name-list');
         let debounceTimer;
 
-        searchInput.addEventListener('input', (e) => {
+        searchInput.addEventListener('input', (event) => {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
-                const query = e.target.value.trim();
-                nameTable.setAttribute('search-query', query);
-            }, 300);
+                nameTable.setAttribute('search-query', event.target.value.trim());
+            }, 250);
         });
     </script>
 </body>
-
 </html>

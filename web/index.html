@@ -3,66 +3,85 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Zord · Rare & Exotic Zats</title>
+    <title>Zord · Zcash Ordinals Index</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <header class="hero">
-        <div>
-            <p class="tag">🆉 Rare & exotic zats</p>
-            <h1>Zord Index</h1>
-            <p class="lede">A CC0 explorer for inscriptions, ZRC-20 tokens, and names forged on Zcash.</p>
-        </div>
-        <zord-status></zord-status>
-    </header>
+    <div class="page">
+        <header class="site-header">
+            <a class="brand" href="/">
+                <span class="brand-icon">Z</span>
+                <span class="brand-label">
+                    <strong>Zord</strong>
+                    <small>zatoshi.market</small>
+                </span>
+            </a>
+            <nav class="site-nav">
+                <a href="/" class="active">Inscriptions</a>
+                <a href="/tokens">ZRC-20</a>
+                <a href="/names">Names</a>
+            </nav>
+            <a class="site-link" href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index</a>
+        </header>
 
-    <main>
-        <section id="inscriptions">
-            <div class="section-heading">
-                <div>
-                    <h2>Inscriptions</h2>
-                    <p>Ord-compatible feed with content-aware previews.</p>
-                </div>
-                <div class="actions">
-                    <button data-target="inscriptions" data-action="prev">Prev</button>
-                    <button data-target="inscriptions" data-action="next">Next</button>
+        <section class="hero hero--home">
+            <div class="hero-copy">
+                <p class="eyebrow">Live Zcash Ord index</p>
+                <h1>Ord-compatible feed for rare & exotic zats</h1>
+                <p class="lede">Watch inscriptions stream in as blocks confirm, then dive into ZRC-20 supply and ZNS names without leaving the shell.</p>
+                <div class="hero-links">
+                    <a class="pill" href="/tokens">View tokens</a>
+                    <a class="pill pill-secondary" href="/names">Browse names</a>
                 </div>
             </div>
-            <inscription-feed page-size="24"></inscription-feed>
-        </section>
-
-        <section id="tokens">
-            <div class="section-heading">
-                <div>
-                    <h2>ZRC-20 Index</h2>
-                    <p>Progress-aware supply overview inspired by ord.</p>
-                </div>
-                <div class="actions">
-                    <button data-target="tokens" data-action="prev">Prev</button>
-                    <button data-target="tokens" data-action="next">Next</button>
-                </div>
+            <div class="hero-status">
+                <zord-status></zord-status>
             </div>
-            <token-table page-size="100"></token-table>
         </section>
 
-        <section id="names">
-            <div class="section-heading">
-                <div>
-                    <h2>ZNS Roll</h2>
-                    <p>First-is-first registry for .zec and .zcash handles.</p>
+        <main class="content">
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <p class="eyebrow">Latest blocks</p>
+                        <h2>Full-width inscription grid</h2>
+                        <p>Each tile matches Ord’s preview behavior with metadata, sender, and content hints.</p>
+                    </div>
+                    <div class="panel-actions">
+                        <button data-target="inscriptions" data-action="prev">Prev</button>
+                        <button data-target="inscriptions" data-action="next">Next</button>
+                    </div>
                 </div>
-                <div class="actions">
-                    <button data-target="names" data-action="prev">Prev</button>
-                    <button data-target="names" data-action="next">Next</button>
-                </div>
-            </div>
-            <name-table page-size="100"></name-table>
-        </section>
-    </main>
+                <inscription-feed page-size="36"></inscription-feed>
+            </section>
 
-    <footer>
-        <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index.zatoshi.market</a>. Source released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.</p>
-    </footer>
+            <section class="link-grid">
+                <a class="link-card" href="/tokens">
+                    <div>
+                        <p class="eyebrow">ZRC-20</p>
+                        <h3>Supply index</h3>
+                        <p>Track deploys, mint caps, and inscription anchors per ticker.</p>
+                    </div>
+                    <span>→</span>
+                </a>
+                <a class="link-card" href="/names">
+                    <div>
+                        <p class="eyebrow">ZNS</p>
+                        <h3>Name roll</h3>
+                        <p>Resolve .zec and .zcash handles with ownership context.</p>
+                    </div>
+                    <span>→</span>
+                </a>
+            </section>
+        </main>
+
+        <footer>
+            <p>Built for the Zatoshi index at <a href="https://index.zatoshi.market" target="_blank" rel="noreferrer">index.zatoshi.market</a>. Source released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noreferrer">CC0-1.0</a>.</p>
+        </footer>
+    </div>
 
     <script type="module" src="/static/app.js"></script>
 </body>

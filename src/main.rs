@@ -13,9 +13,16 @@ use tracing_subscriber::FmtSubscriber;
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::INFO)
-        .finish();
+    let verbose = env::var("VERBOSE_LOGS")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false);
+    let max_level = if verbose {
+        tracing::Level::DEBUG
+    } else {
+        tracing::Level::INFO
+    };
+
+    let subscriber = FmtSubscriber::builder().with_max_level(max_level).finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     // Config

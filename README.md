@@ -14,6 +14,8 @@ API_PORT=3333 docker compose up -d
 
 Environment variables live in `.env.example`.  Set `ZCASH_RPC_PASSWORD` before running; URL/username default to the public Zatoshi RPC for demos but should be overridden in production.
 
+Need deeper traces while debugging? set `VERBOSE_LOGS=true` to bump `RUST_LOG` to `debug` without touching the code.
+
 ## Documentation
 
 All long-form docs moved to [`/docs`](docs/index.md):

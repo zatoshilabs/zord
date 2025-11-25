@@ -11,6 +11,7 @@
 | `DB_PATH` | `./data/index` (dev) / `/data/zord.db` (container) | Mount persistent storage here. |
 | `ZSTART_HEIGHT` | `3132356` | Block height of the first ord-style envelope on Zcash. |
 | `ZMQ_URL` | unset | Optional `tcp://host:port` for low-latency tips. |
+| `VERBOSE_LOGS` | `false` | Set to `true` to enable debug-level tracing in production. |
 
 ## Docker
 

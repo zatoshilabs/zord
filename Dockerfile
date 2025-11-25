@@ -10,6 +10,9 @@ COPY Cargo.* ./
 # Copy source code
 COPY src ./src
 
+# Copy web assets so build-time `include_str!` works
+COPY web ./web
+
 # Install build dependencies
 RUN apt-get update && \
     apt-get install -y build-essential pkg-config libssl-dev && \

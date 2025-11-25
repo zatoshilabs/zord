@@ -3,8 +3,9 @@ FROM rust:1.75-slim-bookworm as builder
 
 WORKDIR /build
 
-# Copy manifests
-COPY Cargo.toml Cargo.lock ./
+# Copy manifests. Match both Cargo.toml and Cargo.lock without failing
+# when the lockfile is absent (e.g. older commits).
+COPY Cargo.* ./
 
 # Copy source code
 COPY src ./src

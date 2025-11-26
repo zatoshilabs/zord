@@ -151,6 +151,15 @@ pub async fn start_api(db: Db, port: u16) {
             get(get_zrc721_collection_tokens),
         )
         .route("/api/v1/zrc721/address/:address", get(get_zrc721_address_tokens))
+        .route(
+            "/api/v1/zrc721/token/:collection/:id",
+            get(get_zrc721_token_info),
+        )
+        .route("/api/v1/healthz", get(get_healthz))
+        .route(
+            "/api/v1/zrc20/token/:tick/burned",
+            get(get_zrc20_burned),
+        )
         // Compatibility endpoints for Ord-style tools
         .route("/inscription/:id", get(get_inscription))
         .route("/inscriptions", get(get_recent_inscriptions))
@@ -767,6 +776,58 @@ async fn get_zrc721_address_tokens(
         "page": page,
         "limit": limit,
         "tokens": tokens
+    }))
+}
+
+async fn get_zrc721_token_info(
+    State(state): State<AppState>,
+    Path((collection, id)): Path<(String, String)>,
+) -> Json<serde_json::Value> {
+    let lower = collection.to_lowercase();
+    if let Ok(Some(raw)) = state.db.get_zrc721_token(&lower, &id) {
+        if let Ok(mut token) = serde_json::from_str::<serde_json::Value>(&raw) {
+            let meta_cid = state
+                .db
+                .get_zrc721_collection(&lower)
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| v["meta"].as_str().map(|s| s.to_string()));
+            if let Some(cid) = meta_cid {
+                token["metadata_path"] = serde_json::json!(format!("ipfs://{}/{}.json", cid, id));
+            }
+            return Json(token);
+        }
+    }
+    Json(serde_json::json!({ "error": "Token not found" }))
+}
+
+async fn get_zrc20_burned(
+    State(state): State<AppState>,
+    Path(tick): Path<String>,
+) -> Json<serde_json::Value> {
+    let lower = tick.to_lowercase();
+    let burned = state.db.get_burned(&lower).unwrap_or(0);
+    Json(serde_json::json!({ "tick": lower, "burned_base_units": burned.to_string() }))
+}
+
+async fn get_healthz(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let height = state.db.get_latest_indexed_height().unwrap_or(None);
+    let chain_tip = state.db.get_status("chain_tip").unwrap_or(None);
+    let zrc20_height = state.db.get_status("zrc20_height").unwrap_or(None);
+    let zrc721_height = state.db.get_status("zrc721_height").unwrap_or(None);
+    let names_height = state.db.get_status("names_height").unwrap_or(None);
+    let synced = match (height, chain_tip) { (Some(h), Some(t)) => h >= t.saturating_sub(1), _ => false };
+    Json(serde_json::json!({
+        "height": height,
+        "chain_tip": chain_tip,
+        "components": {
+            "zrc20": { "height": zrc20_height, "tip": chain_tip },
+            "zrc721": { "height": zrc721_height, "tip": chain_tip },
+            "names": { "height": names_height, "tip": chain_tip }
+        },
+        "synced": synced,
+        "version": env!("CARGO_PKG_VERSION")
     }))
 }
 

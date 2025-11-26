@@ -32,7 +32,7 @@ Notes on amounts
   - GET `/api/v1/tokens?page=&limit=&q=` → `{ items:[ { ticker, max, max_base_units, supply, supply_base_units, lim, dec, deployer, inscription_id, progress } ] }`
 - Token info
   - GET `/api/v1/zrc20/token/:tick` → stored deploy record `{ tick, max, lim, dec, deployer, supply(base units), inscription_id }`
-  - GET `/api/v1/zrc20/token/:tick/summary` → `{ holders, transfers_completed, supply_base_units, lim, max, dec, integrity:{ consistent, sum_holders_base_units } }`
+  - GET `/api/v1/zrc20/token/:tick/summary` → `{ holders, transfers_completed, supply_base_units, lim, max, dec, integrity:{ consistent, sum_holders_base_units, burned_base_units } }`
 - Holders for a ticker
   - GET `/api/v1/zrc20/token/:tick/balances?page=&limit=` → `{ tick, page, limit, total_holders, holders:[ { address, available, overall } ] }`
 - Address portfolio
@@ -44,6 +44,7 @@ Notes on amounts
   - GET `/api/v1/zrc20/token/:tick/integrity` → `{ supply_base_units, sum_overall_base_units, sum_available_base_units, burned_base_units, total_holders, consistent }`
 - Status
   - GET `/api/v1/zrc20/status` → `{ height, chain_tip, tokens, version }`
+  - GET `/api/v1/zrc20/token/:tick/burned` → `{ burned_base_units }`
 - Compatibility
   - GET `/token/:tick` (same as token info, legacy)
   - GET `/token/:tick/balance/:address`

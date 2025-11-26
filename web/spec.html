@@ -31,6 +31,7 @@
                 <li><code>GET /tx/:txid</code> – raw transaction (vin/vout)</li>
                 <li><code>GET /api/v1/inscriptions?page=&limit=</code> – recent inscriptions</li>
                 <li><code>GET /inscription/:id</code> (HTML), <code>/preview/:id</code>, <code>/content/:id</code></li>
+                <li><code>GET /api/v1/healthz</code> – health snapshot (heights, synced)</li>
             </ul>
         </section>
         <section>
@@ -41,7 +42,8 @@
                 <li><code>GET /api/v1/zrc20/token/:tick/balances?page=&limit=</code> – holders</li>
                 <li><code>GET /api/v1/zrc20/address/:address</code> – address portfolio</li>
                 <li><code>GET /api/v1/zrc20/transfer/:id</code> – staged transfer (with <code>used</code> and <code>outpoint</code>)</li>
-                <li><code>GET /api/v1/zrc20/token/:tick/integrity</code> – supply vs holders sum</li>
+                <li><code>GET /api/v1/zrc20/token/:tick/integrity</code> – supply vs holders sum (+ burned)</li>
+                <li><code>GET /api/v1/zrc20/token/:tick/burned</code> – total burned to shielded</li>
                 <li><code>GET /api/v1/zrc20/status</code> – module height</li>
                 <li>Compat: <code>/token/:tick</code>, <code>/token/:tick/balance/:address</code></li>
             </ul>
@@ -52,6 +54,7 @@
                 <li><code>GET /api/v1/zrc721/collections?page=&limit=</code></li>
                 <li><code>GET /api/v1/zrc721/collection/:collection</code></li>
                 <li><code>GET /api/v1/zrc721/collection/:collection/tokens?page=&limit=</code></li>
+                <li><code>GET /api/v1/zrc721/token/:collection/:id</code></li>
                 <li><code>GET /api/v1/zrc721/address/:address</code></li>
                 <li><code>GET /api/v1/zrc721/status</code></li>
             </ul>

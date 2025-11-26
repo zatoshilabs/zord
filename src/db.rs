@@ -737,6 +737,14 @@ impl Db {
         Ok(rows.into_iter().skip(offset).take(limit).collect())
     }
 
+    pub fn get_zrc721_token(&self, collection: &str, token_id: &str) -> Result<Option<String>> {
+        let key = format!("{}#{}", collection, token_id);
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(ZRC721_TOKENS)?;
+        let val = table.get(key.as_str())?.map(|v| v.value().to_string());
+        Ok(val)
+    }
+
     pub fn zrc721_counts(&self) -> Result<(usize, usize)> {
         let read_txn = self.db.begin_read()?;
         let collections = read_txn.open_table(ZRC721_COLLECTIONS)?;

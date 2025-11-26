@@ -38,6 +38,8 @@ impl Zrc721Engine {
         inscription_id: &str,
         sender: &str,
         content: &str,
+        txid: Option<&str>,
+        assigned_vout: Option<u32>,
     ) -> Result<()> {
         if event_type != "inscribe" {
             return Ok(());
@@ -50,7 +52,7 @@ impl Zrc721Engine {
 
         match op.op.as_str() {
             "deploy" => self.handle_deploy(&op, inscription_id, sender),
-            "mint" => self.handle_mint(&op, inscription_id, sender),
+            "mint" => self.handle_mint(&op, inscription_id, sender, txid, assigned_vout),
             _ => Err(anyhow::anyhow!("Unsupported op")),
         }
     }
@@ -95,6 +97,8 @@ impl Zrc721Engine {
         op: &Zrc721Operation,
         inscription_id: &str,
         sender: &str,
+        txid: Option<&str>,
+        assigned_vout: Option<u32>,
     ) -> Result<()> {
         let tick = op
             .tick
@@ -114,6 +118,10 @@ impl Zrc721Engine {
         let owner = op.to.as_deref().unwrap_or(sender);
 
         let metadata = op.meta.clone().unwrap_or_else(|| serde_json::json!({}));
-        self.db.insert_zrc721_token(&tick, token_id, owner, inscription_id, &metadata)
+        self.db.insert_zrc721_token(&tick, token_id, owner, inscription_id, &metadata)?;
+        if let (Some(txid), Some(vout)) = (txid, assigned_vout) {
+            let _ = self.db.register_zrc721_outpoint(txid, vout, &tick, token_id);
+        }
+        Ok(())
     }
 }

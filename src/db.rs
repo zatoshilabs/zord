@@ -17,6 +17,8 @@ const BALANCES: TableDefinition<&str, &str> = TableDefinition::new("balances");
 // Pending transfer metadata keyed by inscription id
 const TRANSFER_INSCRIPTIONS: TableDefinition<&str, &str> =
     TableDefinition::new("transfer_inscriptions");
+// ZRC-20 burned amounts per ticker (base units as string)
+const ZRC20_BURNS: TableDefinition<&str, &str> = TableDefinition::new("zrc20_burns");
 // Map outpoint ("<txid>:<vout>") -> transfer inscription id
 const TRANSFER_OUTPOINTS: TableDefinition<&str, &str> =
     TableDefinition::new("transfer_outpoints");
@@ -37,6 +39,8 @@ const NAMES: TableDefinition<&str, &str> = TableDefinition::new("names");
 const ZRC721_COLLECTIONS: TableDefinition<&str, &str> =
     TableDefinition::new("zrc721_collections");
 const ZRC721_TOKENS: TableDefinition<&str, &str> = TableDefinition::new("zrc721_tokens");
+const ZRC721_OUTPOINTS: TableDefinition<&str, &str> =
+    TableDefinition::new("zrc721_outpoints");
 
 #[derive(Clone)]
 /// Shared handle to the redb-backed state store.
@@ -57,6 +61,8 @@ pub struct Zrc721Token {
     pub owner: String,
     pub inscription_id: String,
     pub metadata: serde_json::Value,
+    #[serde(default)]
+    pub shielded_burn: bool,
 }
 
 impl Db {
@@ -82,6 +88,7 @@ impl Db {
             write_txn.open_table(TOKENS)?;
             write_txn.open_table(BALANCES)?;
             write_txn.open_table(TRANSFER_INSCRIPTIONS)?;
+            write_txn.open_table(ZRC20_BURNS)?;
             write_txn.open_table(TRANSFER_OUTPOINTS)?;
             write_txn.open_table(INSCRIPTION_STATE)?;
             write_txn.open_table(INSCRIPTION_NUMBERS)?;
@@ -91,6 +98,7 @@ impl Db {
             write_txn.open_table(NAMES)?;
             write_txn.open_table(ZRC721_COLLECTIONS)?;
             write_txn.open_table(ZRC721_TOKENS)?;
+            write_txn.open_table(ZRC721_OUTPOINTS)?;
         }
         write_txn.commit()?;
 
@@ -418,6 +426,33 @@ impl Db {
         Ok((sum_overall, sum_available, count))
     }
 
+    pub fn add_burned(&self, tick: &str, amt: u128) -> Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut burns = write_txn.open_table(ZRC20_BURNS)?;
+            let current: u128 = burns
+                .get(tick)?
+                .and_then(|v| v.value().parse::<u128>().ok())
+                .unwrap_or(0);
+            let next = current
+                .checked_add(amt)
+                .ok_or_else(|| anyhow::anyhow!("burn overflow"))?;
+            burns.insert(tick, next.to_string().as_str())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn get_burned(&self, tick: &str) -> Result<u128> {
+        let read_txn = self.db.begin_read()?;
+        let burns = read_txn.open_table(ZRC20_BURNS)?;
+        let v = burns
+            .get(tick)?
+            .and_then(|v| v.value().parse::<u128>().ok())
+            .unwrap_or(0);
+        Ok(v)
+    }
+
     /// Count completed (settled) transfer inscriptions for a given ticker.
     pub fn count_completed_transfers_for_tick(&self, tick: &str) -> Result<u64> {
         let needle = tick.to_lowercase();
@@ -588,8 +623,70 @@ impl Db {
                 owner: owner.to_string(),
                 inscription_id: inscription_id.to_string(),
                 metadata: metadata.clone(),
+                shielded_burn: false,
             };
             tokens.insert(key.as_str(), serde_json::to_string(&token)?.as_str())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn register_zrc721_outpoint(&self, txid: &str, vout: u32, collection: &str, token_id: &str) -> Result<()> {
+        let key = format!("{}:{}", txid, vout);
+        let value = format!("{}#{}", collection, token_id);
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(ZRC721_OUTPOINTS)?;
+            table.insert(key.as_str(), value.as_str())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn zrc721_by_outpoint(&self, txid: &str, vout: u32) -> Result<Option<(String, String)>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(ZRC721_OUTPOINTS)?;
+        let key = format!("{}:{}", txid, vout);
+        if let Some(val) = table.get(key.as_str())? {
+            let s = val.value();
+            if let Some((c, id)) = s.split_once('#') {
+                return Ok(Some((c.to_string(), id.to_string())));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn move_zrc721_outpoint(&self, prev_txid: &str, prev_vout: u32, new_txid: &str, new_vout: u32) -> Result<()> {
+        let prev = format!("{}:{}", prev_txid, prev_vout);
+        let next = format!("{}:{}", new_txid, new_vout);
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(ZRC721_OUTPOINTS)?;
+            let v = match table.get(prev.as_str())? {
+                Some(val) => val.value().to_string(),
+                None => {
+                    // nothing to move
+                    return Ok(());
+                }
+            };
+            table.insert(next.as_str(), v.as_str())?;
+            let _ = table.remove(prev.as_str());
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn update_zrc721_owner(&self, collection: &str, token_id: &str, owner: &str, shielded_burn: bool) -> Result<()> {
+        let key = format!("{}#{}", collection, token_id);
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(ZRC721_TOKENS)?;
+            let current = match table.get(key.as_str())? { Some(r) => r.value().to_string(), None => return Ok(()) };
+            let mut t: Zrc721Token = serde_json::from_str(&current)?;
+            t.owner = owner.to_string();
+            t.shielded_burn = shielded_burn;
+            let s = serde_json::to_string(&t)?;
+            table.insert(key.as_str(), s.as_str())?;
         }
         write_txn.commit()?;
         Ok(())

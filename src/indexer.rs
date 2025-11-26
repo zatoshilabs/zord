@@ -191,6 +191,8 @@ impl Indexer {
                                 &inscription_id,
                                 &sender,
                                 &content,
+                                Some(txid),
+                                Some(assigned_vout),
                             ) {
                                 tracing::debug!("Not a valid ZRC-721 operation: {}", e);
                             }
@@ -232,6 +234,37 @@ impl Indexer {
                         let _ = self.db.mark_inscription_used(&inscription_id);
                         let _ = self.db.remove_transfer_outpoint(prev_txid, prev_vout);
                         tracing::info!("Settled transfer reveal {} -> receiver {:?}", inscription_id, receiver);
+                    }
+
+                    // ZRC-721: ownership move if mint outpoint is spent
+                    if let Ok(Some((collection, token_id))) = self.db.zrc721_by_outpoint(prev_txid, prev_vout) {
+                        // Determine receiver: first transparent address in outputs; if none, mark shielded burn
+                        let mut receiver: Option<String> = None;
+                        let mut new_vout: Option<u32> = None;
+                        for out in &tx.vout {
+                            if let Some(addrs) = &out.script_pub_key.addresses {
+                                if let Some(first) = addrs.first() {
+                                    if !first.starts_with('z') {
+                                        receiver = Some(first.clone());
+                                        new_vout = Some(out.n);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        match (receiver, new_vout) {
+                            (Some(addr), Some(vout)) => {
+                                let _ = self.db.update_zrc721_owner(&collection, &token_id, &addr, false);
+                                let _ = self.db.move_zrc721_outpoint(prev_txid, prev_vout, txid, vout);
+                                tracing::info!("ZRC-721 moved: {}#{} -> {} (vout {})", collection, token_id, addr, vout);
+                            }
+                            _ => {
+                                let _ = self.db.update_zrc721_owner(&collection, &token_id, "shielded", true);
+                                // Remove outpoint mapping to prevent further attribution
+                                let _ = self.db.move_zrc721_outpoint(prev_txid, prev_vout, txid, 0);
+                                tracing::info!("ZRC-721 shielded burn: {}#{}", collection, token_id);
+                            }
+                        }
                     }
                 }
             }

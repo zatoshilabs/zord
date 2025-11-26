@@ -15,8 +15,7 @@
             <a href="/">inscriptions</a>
             <a href="/tokens">zrc-20</a>
             <a href="/collections" class="active">zrc-721</a>
-            <a href="/names/zec">names.zec</a>
-            <a href="/names/zcash">names.zcash</a>
+            <a href="/names">names</a>
             <a href="/docs">docs</a>
             <a href="/spec">api</a>
         </nav>
@@ -31,11 +30,11 @@
             <table id="collection-table">
                 <thead>
                     <tr>
-                        <th>Collection</th>
-                        <th>Minted</th>
-                        <th>Supply</th>
+                        <th data-sort="collection">Collection</th>
+                        <th data-sort="minted">Minted</th>
+                        <th data-sort="supply">Supply</th>
                         <th>Meta</th>
-                        <th>Royalty</th>
+                        <th data-sort="royalty">Royalty</th>
                         <th>Deploy&nbsp;Inscription</th>
                     </tr>
                 </thead>
@@ -52,6 +51,25 @@
         const searchInput = document.getElementById('collection-search');
         let debounce;
 
+        let sortKey = 'minted';
+        let sortDir = 'desc';
+
+        function sortItems(items) {
+            const dir = sortDir === 'asc' ? 1 : -1;
+            const get = (e) => {
+                if (sortKey === 'collection') return (e.collection || '').toLowerCase();
+                if (sortKey === 'minted') return Number(e.minted || 0);
+                if (sortKey === 'supply') return Number(e.supply || 0);
+                if (sortKey === 'royalty') return Number(e.royalty || 0);
+                return 0;
+            };
+            return items.slice().sort((a,b)=>{
+                const va = get(a), vb = get(b);
+                if (typeof va === 'string') return va.localeCompare(vb) * dir;
+                return (va - vb) * dir;
+            });
+        }
+
         async function loadCollections(query = '') {
             const params = new URLSearchParams({ page: '0', limit: '200' });
             if (query) params.set('q', query);
@@ -59,10 +77,13 @@
             if (!res.ok) return;
             const data = await res.json();
             tableBody.innerHTML = '';
-            data.collections.forEach((entry) => {
+            sortItems(data.collections || []).forEach((entry) => {
                 const tr = document.createElement('tr');
                 const tick = document.createElement('td');
-                tick.textContent = (entry.collection || '').toUpperCase();
+                const a = document.createElement('a');
+                a.href = `/collection/${encodeURIComponent(entry.collection || '')}`;
+                a.textContent = (entry.collection || '').toUpperCase();
+                tick.appendChild(a);
                 tr.appendChild(tick);
 
                 const minted = document.createElement('td');
@@ -96,9 +117,28 @@
                 deploy.appendChild(link);
                 tr.appendChild(deploy);
 
-                tableBody.appendChild(tr);
+            tableBody.appendChild(tr);
             });
         }
+
+        document.querySelector('#collection-table thead').addEventListener('click', (e) => {
+            const th = e.target.closest('th[data-sort]');
+            if (!th) return;
+            const key = th.dataset.sort;
+            if (sortKey === key) {
+                sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortKey = key;
+                sortDir = 'desc';
+            }
+            localStorage.setItem('zord_collections_sort_key', sortKey);
+            localStorage.setItem('zord_collections_sort_dir', sortDir);
+            loadCollections(document.getElementById('collection-search').value.trim());
+        });
+
+        // Restore sort
+        sortKey = localStorage.getItem('zord_collections_sort_key') || 'minted';
+        sortDir = localStorage.getItem('zord_collections_sort_dir') || 'desc';
 
         searchInput.addEventListener('input', (event) => {
             clearTimeout(debounce);

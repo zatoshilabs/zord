@@ -1,4 +1,5 @@
 use crate::db::Db;
+use crate::rpc::ZcashRpcClient;
 use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
@@ -111,6 +112,7 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/names/zcash", get(names_zcash_page))
         .route("/collections", get(collections_page))
         .route("/zrc721", get(collections_page))
+        .route("/collection/:tick", get(collection_detail_page))
         .route("/docs", get(docs_page))
         .route("/spec", get(spec_page))
         .route("/api", get(api_docs))
@@ -776,6 +778,13 @@ async fn collections_page() -> Html<String> {
     }
 }
 
+async fn collection_detail_page(Path(_tick): Path<String>) -> Html<String> {
+    match std::fs::read_to_string("web/collection.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<p>collection page missing</p>".to_string()),
+    }
+}
+
 async fn docs_page() -> Html<String> {
     match std::fs::read_to_string("web/docs.html") {
         Ok(content) => Html(content),
@@ -1089,22 +1098,63 @@ async fn get_block(
     State(_state): State<AppState>,
     Path(query): Path<String>,
 ) -> Json<serde_json::Value> {
-        // RPC stub (wire to Zcash RPC if block explorer is required)
-    Json(serde_json::json!({
-        "error": "Block explorer not yet implemented",
-        "query": query
-    }))
+    let rpc = ZcashRpcClient::new();
+    // Accept either height (u64) or hash
+    let result = if let Ok(height) = query.parse::<u64>() {
+        match rpc.get_block_hash(height).await {
+            Ok(hash) => rpc.get_block(&hash).await.map(|blk| (hash, blk)),
+            Err(e) => Err(e),
+        }
+    } else {
+        let hash = query.clone();
+        rpc.get_block(&hash).await.map(|blk| (hash, blk))
+    };
+
+    match result {
+        Ok((hash, blk)) => Json(serde_json::json!({
+            "hash": hash,
+            "height": blk.height,
+            "time": blk.time,
+            "tx": blk.tx,
+            "previous": blk.previousblockhash
+        })),
+        Err(e) => Json(serde_json::json!({ "error": e.to_string(), "query": query })),
+    }
 }
 
 async fn get_transaction(
     State(_state): State<AppState>,
     Path(txid): Path<String>,
 ) -> Json<serde_json::Value> {
-    // RPC stub for transaction lookup
-    Json(serde_json::json!({
-        "error": "Transaction explorer not yet implemented",
-        "txid": txid
-    }))
+    let rpc = ZcashRpcClient::new();
+    match rpc.get_raw_transaction(&txid).await {
+        Ok(tx) => {
+            let vins: Vec<serde_json::Value> = tx
+                .vin
+                .into_iter()
+                .map(|v| serde_json::json!({
+                    "txid": v.txid,
+                    "vout": v.vout
+                }))
+                .collect();
+            let vouts: Vec<serde_json::Value> = tx
+                .vout
+                .into_iter()
+                .map(|o| serde_json::json!({
+                    "n": o.n,
+                    "value": o.value,
+                    "addresses": o.script_pub_key.addresses
+                }))
+                .collect();
+            Json(serde_json::json!({
+                "txid": tx.txid,
+                "hex": tx.hex,
+                "vin": vins,
+                "vout": vouts
+            }))
+        }
+        Err(e) => Json(serde_json::json!({ "error": e.to_string(), "txid": txid })),
+    }
 }
 
 async fn get_status(State(state): State<AppState>) -> Json<serde_json::Value> {

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zord · Collection</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header class="bar">
+        <nav>
+            <a href="/">inscriptions</a>
+            <a href="/tokens">zrc-20</a>
+            <a href="/collections" class="active">zrc-721</a>
+            <a href="/names">names</a>
+            <a href="/docs">docs</a>
+            <a href="/spec">api</a>
+        </nav>
+        <zord-status></zord-status>
+    </header>
+
+    <main>
+        <section class="controls">
+            <div class="chip-row" id="token-sort">
+                <button type="button" data-key="token_id" class="chip active">ID</button>
+                <button type="button" data-key="owner" class="chip">Owner</button>
+                <button type="button" data-dir="asc" class="chip">ASC</button>
+                <button type="button" data-dir="desc" class="chip active">DESC</button>
+            </div>
+            <div class="pager">
+                <button data-action="prev">prev</button>
+                <button data-action="next">next</button>
+            </div>
+        </section>
+        <div class="token-wrap">
+            <table id="tokens-table">
+                <thead>
+                    <tr>
+                        <th data-sort="token_id">Token ID</th>
+                        <th data-sort="owner">Owner</th>
+                        <th>Inscription</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+
+    <sync-footer></sync-footer>
+    <script>
+    (function(){
+        const path = location.pathname;
+        const m = path.match(/\/collection\/(.+)$/);
+        const collection = m ? decodeURIComponent(m[1]) : '';
+        const tbody = document.querySelector('#tokens-table tbody');
+        let page = 0, limit = 200;
+        let sortKey = localStorage.getItem('zord_collection_tokens_sort_key') || 'token_id';
+        let sortDir = localStorage.getItem('zord_collection_tokens_sort_dir') || 'desc';
+
+        function sortItems(items){
+            const dir = sortDir === 'asc' ? 1 : -1;
+            return items.slice().sort((a,b)=>{
+                let va, vb;
+                if (sortKey === 'token_id') { va = Number(a.token_id||0); vb = Number(b.token_id||0); }
+                else { va = (a.owner||'').toLowerCase(); vb = (b.owner||'').toLowerCase(); }
+                if (typeof va === 'string') return va.localeCompare(vb) * dir;
+                return (va - vb) * dir;
+            });
+        }
+
+        async function load(){
+            const res = await fetch(`/api/v1/zrc721/collection/${encodeURIComponent(collection)}/tokens?page=${page}&limit=${limit}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            tbody.innerHTML = '';
+            sortItems(data.tokens || []).forEach(t=>{
+                const tr = document.createElement('tr');
+                const id = document.createElement('td'); id.textContent = t.token_id; tr.appendChild(id);
+                const owner = document.createElement('td'); owner.textContent = t.owner; tr.appendChild(owner);
+                const linkTd = document.createElement('td');
+                const a = document.createElement('a'); a.href = `/inscription/${t.inscription_id}`; a.textContent = t.inscription_id.slice(0,8)+'…'; linkTd.appendChild(a);
+                tr.appendChild(linkTd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        document.getElementById('token-sort').addEventListener('click',(e)=>{
+            const k = e.target.closest('button[data-key]');
+            const d = e.target.closest('button[data-dir]');
+            if (k){
+                document.querySelectorAll('#token-sort button[data-key]').forEach(b=>b.classList.remove('active'));
+                k.classList.add('active');
+                sortKey = k.dataset.key; localStorage.setItem('zord_collection_tokens_sort_key', sortKey);
+                load();
+            } else if (d){
+                document.querySelectorAll('#token-sort button[data-dir]').forEach(b=>b.classList.remove('active'));
+                d.classList.add('active');
+                sortDir = d.dataset.dir; localStorage.setItem('zord_collection_tokens_sort_dir', sortDir);
+                load();
+            }
+        });
+
+        document.querySelector('.pager').addEventListener('click', (e)=>{
+            const btn = e.target.closest('button[data-action]');
+            if (!btn) return; const dir = btn.dataset.action==='next'?1:-1; page=Math.max(0,page+dir); load();
+        });
+
+        load();
+    })();
+    </script>
+</body>
+</html>
+

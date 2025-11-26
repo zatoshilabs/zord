@@ -14,8 +14,7 @@
         <nav>
             <a href="/">inscriptions</a>
             <a href="/tokens">zrc-20</a>
-            <a href="/names/zec">names.zec</a>
-            <a href="/names/zcash">names.zcash</a>
+            <a href="/names" class="active">names</a>
             <a href="/docs">docs</a>
             <a href="/spec">api</a>
         </nav>
@@ -23,8 +22,21 @@
     </header>
 
     <main>
-        <section class="search">
-            <input type="text" id="name-search" placeholder="filter names" autocomplete="off">
+        <section class="controls">
+            <div class="chip-row" id="name-tld-filter">
+                <button type="button" data-tld="" class="chip active">ALL</button>
+                <button type="button" data-tld="zec" class="chip">.ZEC</button>
+                <button type="button" data-tld="zcash" class="chip">.ZCASH</button>
+            </div>
+            <div class="search" style="flex:1;">
+                <input type="text" id="name-search" placeholder="filter names" autocomplete="off" style="width:100%;">
+            </div>
+        </section>
+        <section class="controls">
+            <div class="chip-row" id="name-sort">
+                <button type="button" data-dir="asc" class="chip">A→Z</button>
+                <button type="button" data-dir="desc" class="chip active">Z→A</button>
+            </div>
         </section>
         <section class="search" style="display:flex; gap:8px; align-items:center;">
             <input type="text" id="resolver-input" placeholder="resolve name (e.g. alice.zec)" autocomplete="off">
@@ -75,6 +87,42 @@
         resolverButton.addEventListener('click', () => resolveName(resolverInput.value));
         resolverInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') resolveName(resolverInput.value);
+        });
+
+        const tldRow = document.getElementById('name-tld-filter');
+        tldRow.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-tld]');
+            if (!btn) return;
+            tldRow.querySelectorAll('.chip').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            const val = btn.dataset.tld || '';
+            const table = document.getElementById('name-list');
+            if (val) table.setAttribute('tld', val); else table.removeAttribute('tld');
+            localStorage.setItem('zord_names_tld', val);
+        });
+
+        // Restore saved sort/tld
+        const savedTld = localStorage.getItem('zord_names_tld') || '';
+        if (savedTld) {
+            const btn = tldRow.querySelector(`[data-tld="${savedTld}"]`);
+            if (btn) btn.click();
+        }
+
+        const sortRow = document.getElementById('name-sort');
+        const tableEl = document.getElementById('name-list');
+        const savedDir = localStorage.getItem('zord_names_sort_dir') || 'desc';
+        tableEl.setAttribute('sort-dir', savedDir);
+        sortRow.querySelectorAll('.chip').forEach((b)=>{
+            b.classList.toggle('active', b.dataset.dir === savedDir);
+        });
+        sortRow.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-dir]');
+            if (!btn) return;
+            sortRow.querySelectorAll('.chip').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            const dir = btn.dataset.dir;
+            tableEl.setAttribute('sort-dir', dir);
+            localStorage.setItem('zord_names_sort_dir', dir);
         });
     </script>
 </body>

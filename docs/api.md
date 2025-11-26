@@ -17,6 +17,8 @@ Notes on amounts
 ## Global / Blockchain
 - GET `/api/v1/status` → `{ height, chain_tip, inscriptions, tokens, names, components:{core,zrc20,names}, version }`
 - GET `/block/height` → `{ height }` (latest indexed block height)
+- GET `/block/:query` → block by height or hash `{ hash, height, time, tx, previous }`
+- GET `/tx/:txid` → raw transaction `{ txid, hex, vin:[{txid,vout}], vout:[{n,value,addresses}] }`
 
 ## Inscriptions
 - GET `/api/v1/inscriptions?page=&limit=` → paginated feed with content types, sizes, sender labels, and previews.

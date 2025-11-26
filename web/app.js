@@ -101,7 +101,9 @@ class PaginatedComponent extends HTMLElement {
         this.setPlaceholder('Loading…');
         try {
             const q = this.query ? `&q=${encodeURIComponent(this.query)}` : '';
-            const res = await fetch(`${this.endpoint}?page=${this.page}&limit=${this.limit}${q}`);
+            const tldAttr = this.getAttribute && this.getAttribute('tld');
+            const tld = tldAttr ? `&tld=${encodeURIComponent(tldAttr)}` : '';
+            const res = await fetch(`${this.endpoint}?page=${this.page}&limit=${this.limit}${q}${tld}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             this.hasMore = data.has_more;
@@ -249,12 +251,35 @@ class TokenTable extends PaginatedComponent {
         this.asOf.className = 'notes';
         this.table = document.createElement('table');
         const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th>Ticker</th><th>Supply</th><th>Max&nbsp;Supply</th><th>Mint&nbsp;Limit</th><th>Progress</th><th>Inscription</th></tr>';
+        thead.innerHTML = '<tr>' +
+            '<th data-sort="ticker">Ticker</th>' +
+            '<th data-sort="supply">Supply</th>' +
+            '<th data-sort="max">Max&nbsp;Supply</th>' +
+            '<th data-sort="limit">Mint&nbsp;Limit</th>' +
+            '<th data-sort="progress">Progress</th>' +
+            '<th>Inscription</th>' +
+        '</tr>';
+        thead.addEventListener('click', (e) => {
+            const th = e.target.closest('th[data-sort]');
+            if (!th) return;
+            const key = th.dataset.sort;
+            if (this.sortKey === key) {
+                this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                this.sortKey = key;
+                this.sortDir = 'desc';
+            }
+            this.render(this._lastItems || []);
+            localStorage.setItem('zord_token_sort_key', this.sortKey);
+            localStorage.setItem('zord_token_sort_dir', this.sortDir);
+        });
         this.table.appendChild(thead);
         this.tbody = document.createElement('tbody');
         this.table.appendChild(this.tbody);
         this.container.appendChild(this.asOf);
         this.container.appendChild(this.table);
+        this.sortKey = localStorage.getItem('zord_token_sort_key') || 'progress';
+        this.sortDir = localStorage.getItem('zord_token_sort_dir') || 'desc';
     }
 
     // Format big base-unit string into human units using decimals (string-safe)
@@ -277,8 +302,10 @@ class TokenTable extends PaginatedComponent {
     }
 
     render(items) {
+        this._lastItems = Array.isArray(items) ? items.slice() : [];
+        const list = this.sortItems(this._lastItems);
         this.tbody.innerHTML = '';
-        if (!items.length) {
+        if (!list.length) {
             this.setPlaceholder('No tokens deployed', 'empty');
             return;
         }
@@ -296,7 +323,7 @@ class TokenTable extends PaginatedComponent {
                 this.asOf.textContent = `As of height ${h} (tip: ${tip})`;
             })
             .catch(() => {});
-        items.forEach((token) => {
+        list.forEach((token) => {
             const row = document.createElement('tr');
             const ticker = document.createElement('td');
             ticker.textContent = token.ticker.toUpperCase();
@@ -338,6 +365,38 @@ class TokenTable extends PaginatedComponent {
             this.tbody.appendChild(row);
         });
     }
+
+    sortItems(items) {
+        const key = this.sortKey;
+        const dir = this.sortDir === 'asc' ? 1 : -1;
+        const toBig = (s) => { try { return BigInt(String(s||'0')); } catch { return 0n; } };
+        const decToBig = (str, dec) => {
+            const d = parseInt(dec || '0', 10);
+            if (!str || str === '0') return 0n;
+            if (String(str).includes('.')) {
+                const [w, f=''] = String(str).split('.');
+                const frac = (f + '0'.repeat(Math.max(0, d - f.length))).slice(0, d);
+                return toBig(w) * (10n ** BigInt(d)) + toBig(frac);
+            }
+            return toBig(str) * (10n ** BigInt(d));
+        };
+        const get = (t) => {
+            if (key === 'ticker') return t.ticker.toLowerCase();
+            if (key === 'supply') return toBig(t.supply_base_units || '0');
+            if (key === 'max') return toBig(t.max_base_units || '0');
+            if (key === 'limit') return decToBig(t.lim || '0', t.dec || '0');
+            if (key === 'progress') return Number(t.progress || 0);
+            return 0;
+        };
+        const cmp = (a, b) => {
+            const va = get(a), vb = get(b);
+            if (typeof va === 'string' && typeof vb === 'string') return va.localeCompare(vb) * dir;
+            if (typeof va === 'number' || typeof vb === 'number') return (Number(va) - Number(vb)) * dir;
+            if (va === vb) return 0;
+            return (va > vb ? 1 : -1) * dir;
+        };
+        return items.slice().sort(cmp);
+    }
 }
 
 class NameTable extends PaginatedComponent {
@@ -348,14 +407,31 @@ class NameTable extends PaginatedComponent {
     }
 
     get endpoint() {
-        const tld = this.getAttribute('tld');
-        if (tld === 'zec') return '/api/v1/names/zec';
-        if (tld === 'zcash') return '/api/v1/names/zcash';
         return '/api/v1/names';
     }
 
+    static get observedAttributes() { return ['search-query','tld','sort-dir']; }
+    attributeChangedCallback(name, oldValue, newValue) {
+        if (name === 'search-query' && oldValue !== newValue) {
+            this.query = newValue;
+            this.page = 0;
+            this.fetchPage();
+        }
+        if ((name === 'tld' || name === 'sort-dir') && oldValue !== newValue) {
+            this.page = 0;
+            this.fetchPage();
+        }
+    }
+
     render(items) {
-        if (!items.length) {
+        const dir = (this.getAttribute('sort-dir') || 'desc').toLowerCase();
+        const sorted = (items || []).slice().sort((a,b)=>{
+            const na = (a.name || '').toLowerCase();
+            const nb = (b.name || '').toLowerCase();
+            const cmp = na.localeCompare(nb);
+            return dir === 'asc' ? cmp : -cmp;
+        });
+        if (!sorted.length) {
             // Try to show syncing context instead of a blank/empty state during reindexing
             fetch('/api/v1/status')
                 .then((r) => (r.ok ? r.json() : null))
@@ -375,7 +451,7 @@ class NameTable extends PaginatedComponent {
         this.container.innerHTML = '';
         this.container.appendChild(this.list);
         this.list.innerHTML = '';
-        items.forEach((entry) => {
+        sorted.forEach((entry) => {
             const li = document.createElement('li');
             const name = document.createElement('strong');
             name.textContent = entry.name;

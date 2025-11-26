@@ -27,6 +27,8 @@
             <ul>
                 <li><code>GET /api/v1/status</code> – index height, chain tip, components</li>
                 <li><code>GET /block/height</code> – latest indexed height</li>
+                <li><code>GET /block/:height_or_hash</code> – block details (hash, height, time, tx)</li>
+                <li><code>GET /tx/:txid</code> – raw transaction (vin/vout)</li>
                 <li><code>GET /api/v1/inscriptions?page=&limit=</code> – recent inscriptions</li>
                 <li><code>GET /inscription/:id</code> (HTML), <code>/preview/:id</code>, <code>/content/:id</code></li>
             </ul>

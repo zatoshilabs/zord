@@ -10,18 +10,17 @@ struct Zrc721Operation {
     tick: Option<String>,
     #[serde(default)]
     collection: Option<String>,
+    // ZRC-721 deploy fields
     #[serde(default)]
-    name: Option<String>,
+    supply: Option<String>,
     #[serde(default)]
-    symbol: Option<String>,
+    meta: Option<serde_json::Value>, // string CID or object; we store as JSON
     #[serde(default)]
-    max: Option<String>,
+    royalty: Option<String>,
     #[serde(default)]
     id: Option<String>,
     #[serde(default)]
     to: Option<String>,
-    #[serde(default)]
-    meta: Option<serde_json::Value>,
 }
 
 pub struct Zrc721Engine {
@@ -66,17 +65,23 @@ impl Zrc721Engine {
             .tick
             .as_ref()
             .or(op.collection.as_ref())
-            .ok_or(anyhow::anyhow!("Missing collection/tick"))?
+            .ok_or(anyhow::anyhow!("Missing collection"))?
             .to_lowercase();
-        let name = op.name.as_ref().ok_or(anyhow::anyhow!("Missing name"))?;
-        let symbol = op.symbol.as_ref().unwrap_or(name);
-        let max = op.max.as_ref().ok_or(anyhow::anyhow!("Missing max"))?;
+
+        let supply = op
+            .supply
+            .as_ref()
+            .ok_or(anyhow::anyhow!("Missing supply"))?;
+
+        // meta may be a string (CID) or JSON; store as JSON string or object
+        let meta = op.meta.clone().unwrap_or_else(|| serde_json::json!(null));
+        let royalty = op.royalty.clone().unwrap_or_default();
 
         let payload = serde_json::json!({
-            "tick": tick,
-            "name": name,
-            "symbol": symbol,
-            "max": max,
+            "collection": tick,
+            "supply": supply,
+            "meta": meta,
+            "royalty": royalty,
             "minted": 0,
             "deployer": deployer,
             "inscription_id": inscription_id

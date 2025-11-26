@@ -31,10 +31,11 @@
                 <thead>
                     <tr>
                         <th>Collection</th>
-                        <th>Name</th>
                         <th>Minted</th>
-                        <th>Max</th>
-                            <th>Deploy&nbsp;Inscription</th>
+                        <th>Supply</th>
+                        <th>Meta</th>
+                        <th>Royalty</th>
+                        <th>Deploy&nbsp;Inscription</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -60,20 +61,32 @@
             data.collections.forEach((entry) => {
                 const tr = document.createElement('tr');
                 const tick = document.createElement('td');
-                tick.textContent = entry.tick.toUpperCase();
+                tick.textContent = (entry.collection || '').toUpperCase();
                 tr.appendChild(tick);
-
-                const name = document.createElement('td');
-                name.textContent = entry.name;
-                tr.appendChild(name);
 
                 const minted = document.createElement('td');
                 minted.textContent = entry.minted;
                 tr.appendChild(minted);
 
-                const max = document.createElement('td');
-                max.textContent = entry.max;
-                tr.appendChild(max);
+                const sup = document.createElement('td');
+                sup.textContent = entry.supply;
+                tr.appendChild(sup);
+
+                const meta = document.createElement('td');
+                if (typeof entry.meta === 'string') {
+                    const a = document.createElement('a');
+                    a.href = `https://ipfs.io/ipfs/${entry.meta}`;
+                    a.textContent = entry.meta.slice(0, 10) + '…';
+                    a.target = '_blank';
+                    meta.appendChild(a);
+                } else {
+                    meta.textContent = entry.meta ? '[json]' : '';
+                }
+                tr.appendChild(meta);
+
+                const roy = document.createElement('td');
+                roy.textContent = entry.royalty || '';
+                tr.appendChild(roy);
 
                 const deploy = document.createElement('td');
                 const link = document.createElement('a');

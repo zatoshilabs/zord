@@ -106,13 +106,21 @@ impl Indexer {
                             .insert(inscription_id.clone(), (sender.clone(), content.clone()));
 
                         // Persist enough metadata for the HTTP layer to render without additional RPC calls
+                        // Pick an assigned vout for the inscription: prefer the first output with an address
+                        let assigned_vout: u32 = tx
+                            .vout
+                            .iter()
+                            .find(|o| o.script_pub_key.addresses.as_ref().map(|a| !a.is_empty()).unwrap_or(false))
+                            .map(|o| o.n)
+                            .unwrap_or(0);
+
                         let metadata = serde_json::json!({
                             "id": inscription_id,
                             "content": content,
                             "content_hex": content_hex,
                             "content_type": content_type,
                             "txid": txid,
-                            "vout": 0,
+                            "vout": assigned_vout,
                             "sender": sender,
                             "receiver": receiver,
                             "block_height": height,
@@ -160,6 +168,8 @@ impl Indexer {
                                 &sender,
                                 Some(&receiver),
                                 &content,
+                                Some(txid),
+                                Some(assigned_vout),
                             ) {
                                 tracing::debug!("Not a valid ZRC-20 operation: {}", e);
                             }
@@ -185,6 +195,31 @@ impl Indexer {
                                 tracing::debug!("Not a valid name registration: {}", e);
                             }
                         }
+                    }
+                }
+            }
+            // After indexing inscriptions in this tx, scan inputs to detect transfer reveals
+            for vin in &tx.vin {
+                if let (Some(prev_txid), Some(prev_vout)) = (&vin.txid, vin.vout) {
+                    if let Ok(Some(inscription_id)) = self.db.get_transfer_by_outpoint(prev_txid, prev_vout) {
+                        // Heuristic receiver: first transparent address in current tx outputs
+                        let mut receiver: Option<String> = None;
+                        for out in &tx.vout {
+                            if let Some(addrs) = &out.script_pub_key.addresses {
+                                if let Some(first) = addrs.first() {
+                                    receiver = Some(first.clone());
+                                    break;
+                                }
+                            }
+                        }
+
+                        let _ = self.zrc20.settle_transfer(
+                            &inscription_id,
+                            receiver.as_deref(),
+                        );
+                        let _ = self.db.mark_inscription_used(&inscription_id);
+                        let _ = self.db.remove_transfer_outpoint(prev_txid, prev_vout);
+                        tracing::info!("Settled transfer reveal {} -> receiver {:?}", inscription_id, receiver);
                     }
                 }
             }

@@ -35,6 +35,8 @@ impl Zrc20Engine {
         sender: &str,
         receiver: Option<&str>,
         content: &str,
+        txid: Option<&str>,
+        assigned_vout: Option<u32>,
     ) -> Result<()> {
         // Parse and validate JSON
         let op = match self.parse_and_validate(content) {
@@ -48,7 +50,7 @@ impl Zrc20Engine {
         match (op.op.as_str(), event_type) {
             ("deploy", "inscribe") => self.handle_deploy_inscribe(&op, inscription_id, sender),
             ("mint", "inscribe") => self.handle_mint_inscribe(&op, inscription_id, sender),
-            ("transfer", "inscribe") => self.handle_transfer_inscribe(&op, inscription_id, sender),
+            ("transfer", "inscribe") => self.handle_transfer_inscribe(&op, inscription_id, sender, txid, assigned_vout),
             ("transfer", "transfer") => self.handle_transfer_transfer(inscription_id, receiver),
             _ => Ok(()),
         }
@@ -241,13 +243,8 @@ impl Zrc20Engine {
             return Err(anyhow::anyhow!("Max supply exceeded"));
         }
 
-        // Persist the higher supply figure
-        self.db
-            .update_token_supply(&op.tick.to_lowercase(), current_supply + amt)?;
-
-        // Credit both spendable and overall balances for the minter
-        self.db
-            .update_balance(minter, &op.tick.to_lowercase(), amt as i128, amt as i128)?;
+        // Atomically bump supply and credit holder balance to avoid drift
+        self.db.mint_credit_atomic(&op.tick.to_lowercase(), minter, amt)?;
 
         Ok(())
     }
@@ -257,6 +254,8 @@ impl Zrc20Engine {
         op: &Zrc20Operation,
         inscription_id: &str,
         sender: &str,
+        txid: Option<&str>,
+        assigned_vout: Option<u32>,
     ) -> Result<()> {
         let amt_str = op.amt.as_ref().ok_or(anyhow::anyhow!("Missing amt"))?;
 
@@ -283,6 +282,11 @@ impl Zrc20Engine {
 
         self.db
             .create_transfer_inscription(inscription_id, &transfer_data.to_string())?;
+
+        // Register the actual outpoint for reveal detection when available
+        if let (Some(txid), Some(vout)) = (txid, assigned_vout) {
+            let _ = self.db.register_transfer_outpoint(txid, vout, inscription_id);
+        }
 
         // Lock the amount by reducing only the spendable balance
         self.db
@@ -331,6 +335,11 @@ impl Zrc20Engine {
         self.db.mark_inscription_used(inscription_id)?;
 
         Ok(())
+    }
+
+    /// Public entry to settle a staged transfer when the inscription is revealed (spent).
+    pub fn settle_transfer(&self, inscription_id: &str, receiver: Option<&str>) -> Result<()> {
+        self.handle_transfer_transfer(inscription_id, receiver)
     }
 
     /// Parse amount string with decimals support using overflow-safe arithmetic.

@@ -53,3 +53,14 @@ Notes:
 
 - The database is append-friendly; keep periodic snapshots of `/data` (LVM, ZFS, or rsync) to recover quickly.
 - If the DB becomes corrupted, delete the directory and restart the binary—the indexer will rescan from `ZSTART_HEIGHT`.
+## Integrity checks (cron)
+
+Run a nightly integrity sweep to ensure token supply equals the sum of holders for every ticker. Example cron entry:
+
+```
+# /etc/cron.d/zord-integrity
+0 3 * * * /usr/bin/python3 /srv/zord/scripts/check_integrity.py \
+  --base http://127.0.0.1:8080 >> /var/log/zord-integrity.log 2>&1
+```
+
+The script exits non-zero if any drift is detected so your monitoring can alert. See `scripts/check_integrity.py`.

@@ -17,6 +17,9 @@ const BALANCES: TableDefinition<&str, &str> = TableDefinition::new("balances");
 // Pending transfer metadata keyed by inscription id
 const TRANSFER_INSCRIPTIONS: TableDefinition<&str, &str> =
     TableDefinition::new("transfer_inscriptions");
+// Map outpoint ("<txid>:<vout>") -> transfer inscription id
+const TRANSFER_OUTPOINTS: TableDefinition<&str, &str> =
+    TableDefinition::new("transfer_outpoints");
 
 // Ordinal number -> inscription id mapping
 const INSCRIPTION_NUMBERS: TableDefinition<u64, &str> = TableDefinition::new("inscription_numbers");
@@ -79,6 +82,7 @@ impl Db {
             write_txn.open_table(TOKENS)?;
             write_txn.open_table(BALANCES)?;
             write_txn.open_table(TRANSFER_INSCRIPTIONS)?;
+            write_txn.open_table(TRANSFER_OUTPOINTS)?;
             write_txn.open_table(INSCRIPTION_STATE)?;
             write_txn.open_table(INSCRIPTION_NUMBERS)?;
             write_txn.open_table(ADDRESS_INSCRIPTIONS)?;
@@ -245,6 +249,58 @@ impl Db {
         Ok(())
     }
 
+    /// Atomically credit a mint: increase token supply and holder balance
+    /// in a single write transaction to prevent supply/balance drift.
+    pub fn mint_credit_atomic(&self, ticker: &str, address: &str, amt: u128) -> Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            // Update token supply
+            let mut tokens = write_txn.open_table(TOKENS)?;
+            let info_str = tokens
+                .get(ticker)?
+                .ok_or(anyhow::anyhow!("Token not found"))?
+                .value()
+                .to_string();
+            let mut info: serde_json::Value = serde_json::from_str(&info_str)?;
+            let current_supply: u128 = info["supply"]
+                .as_str()
+                .and_then(|s| s.parse::<u128>().ok())
+                .unwrap_or(0);
+            let new_supply = current_supply
+                .checked_add(amt)
+                .ok_or_else(|| anyhow::anyhow!("Supply overflow"))?;
+            info["supply"] = serde_json::Value::String(new_supply.to_string());
+            tokens.insert(ticker, info.to_string().as_str())?;
+
+            // Update holder balance (available and overall)
+            let mut balances = write_txn.open_table(BALANCES)?;
+            let key = format!("{}:{}", address, ticker);
+            let current = if let Some(val) = balances.get(key.as_str())? {
+                serde_json::from_str::<Balance>(val.value())?
+            } else {
+                Balance {
+                    available: 0,
+                    overall: 0,
+                }
+            };
+
+            let next_available = (current.available as u128)
+                .checked_add(amt)
+                .ok_or_else(|| anyhow::anyhow!("Available balance overflow"))?;
+            let next_overall = (current.overall as u128)
+                .checked_add(amt)
+                .ok_or_else(|| anyhow::anyhow!("Overall balance overflow"))?;
+
+            let new_balance = Balance {
+                available: next_available,
+                overall: next_overall,
+            };
+            balances.insert(key.as_str(), serde_json::to_string(&new_balance)?.as_str())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
     // Balance helpers (available vs overall mirrors BRC-20 semantics)
     pub fn get_balance(&self, address: &str, ticker: &str) -> Result<Balance> {
         let key = format!("{}:{}", address, ticker);
@@ -332,6 +388,34 @@ impl Db {
         let total = rows.len();
         let page_rows = rows.into_iter().skip(offset).take(limit).collect();
         Ok((page_rows, total))
+    }
+
+    /// Sum balances for a given ticker across all addresses.
+    /// Returns (sum_overall, sum_available, holder_count).
+    pub fn sum_balances_for_tick(&self, tick: &str) -> Result<(u128, u128, usize)> {
+        let needle = tick.to_lowercase();
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(BALANCES)?;
+        let mut sum_overall: u128 = 0;
+        let mut sum_available: u128 = 0;
+        let mut count: usize = 0;
+        for item in table.iter()? {
+            let (k, v) = item?;
+            let key = k.value();
+            if let Some((_address, token)) = key.split_once(':') {
+                if token == needle {
+                    let bal = serde_json::from_str::<Balance>(v.value())?;
+                    sum_overall = sum_overall
+                        .checked_add(bal.overall)
+                        .ok_or_else(|| anyhow::anyhow!("overall sum overflow"))?;
+                    sum_available = sum_available
+                        .checked_add(bal.available)
+                        .ok_or_else(|| anyhow::anyhow!("available sum overflow"))?;
+                    count += 1;
+                }
+            }
+        }
+        Ok((sum_overall, sum_available, count))
     }
 
     pub fn list_balances_for_address(&self, address: &str) -> Result<Vec<(String, Balance)>> {
@@ -427,16 +511,15 @@ impl Db {
                 Some(raw) => serde_json::from_str(raw.value())?,
                 None => return Err(anyhow::anyhow!("Collection not found")),
             };
-            // Optional: enforce max supply of tokens per deployment when parsable
+            // Enforce supply-based cap and token id range (0..=supply-1)
             let current_minted = collection["minted"].as_u64().unwrap_or(0);
-            let max_allowed = collection["max"].as_str().and_then(|s| s.parse::<u64>().ok());
+            let max_allowed = collection["supply"].as_str().and_then(|s| s.parse::<u64>().ok());
             if let Some(max_total) = max_allowed {
                 if current_minted >= max_total {
                     return Err(anyhow::anyhow!("Max token count reached"));
                 }
-                // Also enforce id range if numeric
                 if let Ok(id_num) = token_id.parse::<u64>() {
-                    if id_num == 0 || id_num > max_total {
+                    if id_num >= max_total {
                         return Err(anyhow::anyhow!("Token id out of range"));
                     }
                 }
@@ -521,6 +604,36 @@ impl Db {
 
             let mut state_table = write_txn.open_table(INSCRIPTION_STATE)?;
             state_table.insert(inscription_id, "unused")?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn register_transfer_outpoint(&self, txid: &str, vout: u32, inscription_id: &str) -> Result<()> {
+        let key = format!("{}:{}", txid, vout);
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TRANSFER_OUTPOINTS)?;
+            table.insert(key.as_str(), inscription_id)?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn get_transfer_by_outpoint(&self, txid: &str, vout: u32) -> Result<Option<String>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TRANSFER_OUTPOINTS)?;
+        let key = format!("{}:{}", txid, vout);
+        let val = table.get(key.as_str())?.map(|v| v.value().to_string());
+        Ok(val)
+    }
+
+    pub fn remove_transfer_outpoint(&self, txid: &str, vout: u32) -> Result<()> {
+        let key = format!("{}:{}", txid, vout);
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TRANSFER_OUTPOINTS)?;
+            let _ = table.remove(key.as_str());
         }
         write_txn.commit()?;
         Ok(())

@@ -245,13 +245,31 @@ class InscriptionFeed extends PaginatedComponent {
 class TokenTable extends PaginatedComponent {
     setup() {
         super.setup();
+        this.asOf = document.createElement('div');
+        this.asOf.className = 'notes';
         this.table = document.createElement('table');
         const thead = document.createElement('thead');
         thead.innerHTML = '<tr><th>Ticker</th><th>Supply</th><th>Max&nbsp;Supply</th><th>Mint&nbsp;Limit</th><th>Progress</th><th>Inscription</th></tr>';
         this.table.appendChild(thead);
         this.tbody = document.createElement('tbody');
         this.table.appendChild(this.tbody);
+        this.container.appendChild(this.asOf);
         this.container.appendChild(this.table);
+    }
+
+    // Format big base-unit string into human units using decimals (string-safe)
+    formatUnits(baseStr, decimals) {
+        const dec = Math.max(0, parseInt(decimals || '0', 10));
+        let s = String(baseStr || '0').replace(/^0+/, '');
+        if (!s) return '0';
+        if (dec === 0) return s;
+        if (s.length <= dec) {
+            const pad = '0'.repeat(dec - s.length);
+            return `0.${pad}${s}`.replace(/\.0+$/, '');
+        }
+        const head = s.slice(0, s.length - dec);
+        const tail = s.slice(s.length - dec).replace(/0+$/, '');
+        return tail ? `${head}.${tail}` : head;
     }
 
     get endpoint() {
@@ -266,7 +284,18 @@ class TokenTable extends PaginatedComponent {
         }
 
         this.container.innerHTML = '';
+        this.container.appendChild(this.asOf);
         this.container.appendChild(this.table);
+        // Update status banner
+        fetch('/api/v1/status')
+            .then((r) => r.ok ? r.json() : null)
+            .then((status) => {
+                if (!status) return;
+                const h = status.height ?? '—';
+                const tip = status.chain_tip ?? '—';
+                this.asOf.textContent = `As of height ${h} (tip: ${tip})`;
+            })
+            .catch(() => {});
         items.forEach((token) => {
             const row = document.createElement('tr');
             const ticker = document.createElement('td');
@@ -275,14 +304,18 @@ class TokenTable extends PaginatedComponent {
 
             const supply = document.createElement('td');
             supply.textContent = token.supply;
+            supply.title = `base: ${token.supply_base_units}, dec: ${token.dec}`;
             row.appendChild(supply);
 
             const max = document.createElement('td');
-            max.textContent = token.max;
+            const maxHuman = this.formatUnits(token.max_base_units, token.dec);
+            max.textContent = maxHuman;
+            max.title = `raw: ${token.max}, dec: ${token.dec}, base: ${token.max_base_units}`;
             row.appendChild(max);
 
             const lim = document.createElement('td');
             lim.textContent = token.lim;
+            lim.title = `raw: ${token.lim}, dec: ${token.dec}`;
             row.appendChild(lim);
 
             const progressCell = document.createElement('td');
@@ -291,6 +324,7 @@ class TokenTable extends PaginatedComponent {
             const fill = document.createElement('span');
             fill.style.width = `${(token.progress * 100).toFixed(2)}%`;
             bar.appendChild(fill);
+            bar.title = `progress = supply/max (${token.supply_base_units}/${token.max_base_units})`;
             progressCell.appendChild(bar);
             row.appendChild(progressCell);
 

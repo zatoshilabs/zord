@@ -25,6 +25,11 @@
         <section class="search">
             <input type="text" id="name-search" placeholder="filter names" autocomplete="off">
         </section>
+        <section class="search" style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="resolver-input" placeholder="resolve name (e.g. alice.zec)" autocomplete="off">
+            <button id="resolver-button">resolve</button>
+            <span id="resolver-result" class="notes"></span>
+        </section>
         <name-table page-size="120" id="name-list"></name-table>
     </main>
 
@@ -40,6 +45,35 @@
             timer = setTimeout(() => {
                 table.setAttribute('search-query', event.target.value.trim());
             }, 200);
+        });
+
+        async function resolveName(name) {
+            const result = document.getElementById('resolver-result');
+            result.textContent = '…';
+            try {
+                const q = name.trim();
+                if (!q || (!q.endsWith('.zec') && !q.endsWith('.zcash'))) {
+                    result.textContent = 'enter a .zec or .zcash name';
+                    return;
+                }
+                const res = await fetch(`/resolve/${encodeURIComponent(q)}`);
+                if (!res.ok) { result.textContent = 'not found'; return; }
+                const data = await res.json();
+                if (data && data.address) {
+                    result.textContent = data.address;
+                } else {
+                    result.textContent = 'not found';
+                }
+            } catch (e) {
+                result.textContent = 'error resolving';
+            }
+        }
+
+        const resolverInput = document.getElementById('resolver-input');
+        const resolverButton = document.getElementById('resolver-button');
+        resolverButton.addEventListener('click', () => resolveName(resolverInput.value));
+        resolverInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') resolveName(resolverInput.value);
         });
     </script>
 </body>

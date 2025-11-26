@@ -73,11 +73,11 @@ struct TokenSummary {
 
 #[derive(Serialize)]
 struct Zrc721CollectionSummary {
-    tick: String,
-    name: String,
-    symbol: String,
-    max: String,
+    collection: String,
+    supply: String,
     minted: u64,
+    meta: serde_json::Value,
+    royalty: String,
     deployer: String,
     inscription_id: String,
 }
@@ -121,6 +121,10 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/api/v1/zrc20/token/:tick", get(get_token_info))
         .route("/api/v1/zrc20/token/:tick/balances", get(get_zrc20_token_balances))
         .route("/api/v1/zrc20/address/:address", get(get_zrc20_address_balances))
+        .route(
+            "/api/v1/zrc20/token/:tick/integrity",
+            get(get_zrc20_token_integrity),
+        )
         .route("/api/v1/zrc20/transfer/:id", get(get_zrc20_transfer))
         .route("/api/v1/zrc721/status", get(get_zrc721_status))
         .route("/api/v1/zrc721/collections", get(get_zrc721_collections))
@@ -155,6 +159,7 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/names/list", get(get_all_names_api))
         .route("/name/:name", get(get_name_info))
         .route("/resolve/:name", get(resolve_name))
+        .route("/api/v1/resolve/:name", get(resolve_name))
         // Static asset server (keep last)
         .nest_service("/static", ServeDir::new("web"))
         .layer(CorsLayer::permissive())
@@ -527,6 +532,37 @@ async fn get_zrc20_transfer(
     Json(serde_json::json!({ "error": "Transfer not found" }))
 }
 
+async fn get_zrc20_token_integrity(
+    State(state): State<AppState>,
+    Path(tick): Path<String>,
+) -> Json<serde_json::Value> {
+    let lower = tick.to_lowercase();
+    let token_info = state.db.get_token_info(&lower).unwrap_or(None);
+    if let Some(info_str) = token_info {
+        if let Ok(info) = serde_json::from_str::<serde_json::Value>(&info_str) {
+            let supply_base = info["supply"]
+                .as_str()
+                .unwrap_or("0")
+                .to_string();
+            let dec = info["dec"].as_str().unwrap_or("18");
+            let (sum_overall, sum_available, holders) =
+                state.db.sum_balances_for_tick(&lower).unwrap_or((0, 0, 0));
+            let supply = parse_u128(&supply_base);
+            let consistent = supply == sum_overall;
+            return Json(serde_json::json!({
+                "tick": lower,
+                "dec": dec,
+                "supply_base_units": supply_base,
+                "sum_overall_base_units": sum_overall.to_string(),
+                "sum_available_base_units": sum_available.to_string(),
+                "total_holders": holders,
+                "consistent": consistent
+            }));
+        }
+    }
+    Json(serde_json::json!({ "error": "Token not found" }))
+}
+
 async fn get_zrc721_collections(
     State(state): State<AppState>,
     Query(params): Query<PaginationParams>,
@@ -540,11 +576,11 @@ async fn get_zrc721_collections(
         .into_iter()
         .filter_map(|(_tick, raw)| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .map(|info| Zrc721CollectionSummary {
-            tick: info["tick"].as_str().unwrap_or("").to_string(),
-            name: info["name"].as_str().unwrap_or("").to_string(),
-            symbol: info["symbol"].as_str().unwrap_or("").to_string(),
-            max: info["max"].as_str().unwrap_or("0").to_string(),
+            collection: info["collection"].as_str().unwrap_or("").to_string(),
+            supply: info["supply"].as_str().unwrap_or("0").to_string(),
             minted: info["minted"].as_u64().unwrap_or(0),
+            meta: info.get("meta").cloned().unwrap_or(serde_json::json!(null)),
+            royalty: info["royalty"].as_str().unwrap_or("").to_string(),
             deployer: info["deployer"].as_str().unwrap_or("").to_string(),
             inscription_id: info["inscription_id"].as_str().unwrap_or("").to_string(),
         })

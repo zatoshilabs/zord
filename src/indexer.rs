@@ -173,7 +173,22 @@ impl Indexer {
                             );
                         }
 
-                        if content_type == "application/json" {
+                        // Accept JSON payloads using robust MIME detection:
+                        // - application/json
+                        // - application/*+json (RFC 6839 structured suffix)
+                        // - text/* when the body looks like JSON (starts with { or [)
+                        // Case-insensitive, ignore parameters (e.g., "; charset=utf-8").
+                        let looks_json = {
+                            let s = content.trim_start();
+                            s.starts_with('{') || s.starts_with('[')
+                        };
+                        let ct_simple = {
+                            let lower = content_type.to_lowercase();
+                            lower.split(';').next().unwrap_or("").trim().to_string()
+                        };
+                        let is_json_mime = ct_simple == "application/json" || ct_simple.ends_with("+json");
+                        let is_text_like_json = ct_simple.starts_with("text/") && looks_json;
+                        if is_json_mime || is_text_like_json {
                             if let Err(e) = self.zrc20.process(
                                 "inscribe",
                                 &inscription_id,
@@ -199,7 +214,7 @@ impl Indexer {
                         }
 
                         // Plain text payloads may be ZNS registrations
-                        if content_type == "text/plain" {
+                        if ct_simple == "text/plain" && !looks_json {
                             if let Err(e) = self.names.process(
                                 &inscription_id,
                                 &sender,

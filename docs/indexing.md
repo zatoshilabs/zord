@@ -11,7 +11,13 @@
    - Concatenate subsequent pushes until we reach DER signatures or public keys
    - Produce `(inscription_id, sender, receiver, content_type, content_utf8, content_hex)`
 5. Persist the inscription metadata atomically so APIs can read it immediately.
-6. Stream the metadata through metaprotocol engines (ZRC-20, ZNS, future protocols).
+6. Stream the metadata through metaprotocol engines (ZRC-20, ZRC-721, ZNS).
+   - ZRC-20/ZRC-721 JSON payload detection (case-insensitive; parameters ignored):
+     - `application/json`
+     - `application/*+json` (RFC 6839 structured suffix, e.g. `application/ld+json`)
+     - any `text/*` where the body looks like JSON (begins with `{` or `[`)
+   - This matches common BRC-20 indexer behavior and ensures wallets using
+     `text/plain` or `application/*+json` are indexed.
 
 The parser is strict about DER signatures and pubkeys to avoid the THREE CLASSIC BUGS we hit early on:
 - **Uppercase tickers were rejected** – tickers are normalized to lowercase for storage while the original case is preserved for display.

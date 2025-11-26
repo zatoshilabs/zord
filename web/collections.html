@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zord · ZRC-721 Collections</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header class="bar">
+        <nav>
+            <a href="/">inscriptions</a>
+            <a href="/tokens">zrc-20</a>
+            <a href="/collections" class="active">zrc-721</a>
+            <a href="/names">names</a>
+            <a href="/docs">docs</a>
+            <a href="/spec">api</a>
+        </nav>
+        <zord-status></zord-status>
+    </header>
+
+    <main>
+        <section class="search">
+            <input type="text" id="collection-search" placeholder="filter collections" autocomplete="off">
+        </section>
+        <div class="token-wrap">
+            <table id="collection-table">
+                <thead>
+                    <tr>
+                        <th>Collection</th>
+                        <th>Name</th>
+                        <th>Minted</th>
+                        <th>Max</th>
+                            <th>Deploy&nbsp;Inscription</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+
+    <sync-footer></sync-footer>
+
+    <script type="module" src="/static/app.js"></script>
+    <script>
+        const tableBody = document.querySelector('#collection-table tbody');
+        const searchInput = document.getElementById('collection-search');
+        let debounce;
+
+        async function loadCollections(query = '') {
+            const params = new URLSearchParams({ page: '0', limit: '200' });
+            if (query) params.set('q', query);
+            const res = await fetch(`/api/v1/zrc721/collections?${params}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            tableBody.innerHTML = '';
+            data.collections.forEach((entry) => {
+                const tr = document.createElement('tr');
+                const tick = document.createElement('td');
+                tick.textContent = entry.tick.toUpperCase();
+                tr.appendChild(tick);
+
+                const name = document.createElement('td');
+                name.textContent = entry.name;
+                tr.appendChild(name);
+
+                const minted = document.createElement('td');
+                minted.textContent = entry.minted;
+                tr.appendChild(minted);
+
+                const max = document.createElement('td');
+                max.textContent = entry.max;
+                tr.appendChild(max);
+
+                const deploy = document.createElement('td');
+                const link = document.createElement('a');
+                link.href = `/inscription/${entry.inscription_id}`;
+                link.textContent = `${entry.inscription_id.slice(0, 8)}…`;
+                deploy.appendChild(link);
+                tr.appendChild(deploy);
+
+                tableBody.appendChild(tr);
+            });
+        }
+
+        searchInput.addEventListener('input', (event) => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => {
+                loadCollections(event.target.value.trim());
+            }, 250);
+        });
+
+        loadCollections();
+    </script>
+</body>
+</html>

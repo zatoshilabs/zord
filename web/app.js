@@ -247,7 +247,7 @@ class TokenTable extends PaginatedComponent {
         super.setup();
         this.table = document.createElement('table');
         const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th>Ticker</th><th>Minted</th><th>Max</th><th>Limit</th><th>Progress</th><th>Inscription</th></tr>';
+        thead.innerHTML = '<tr><th>Ticker</th><th>Supply</th><th>Max&nbsp;Supply</th><th>Mint&nbsp;Limit</th><th>Progress</th><th>Inscription</th></tr>';
         this.table.appendChild(thead);
         this.tbody = document.createElement('tbody');
         this.table.appendChild(this.tbody);

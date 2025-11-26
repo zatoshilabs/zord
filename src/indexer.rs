@@ -2,6 +2,7 @@ use crate::db::Db;
 use crate::names::NamesEngine;
 use crate::rpc::{ScriptPubKey, ZcashRpcClient};
 use crate::zrc20::Zrc20Engine;
+use crate::zrc721::Zrc721Engine;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -12,17 +13,20 @@ pub struct Indexer {
     db: Db,
     zrc20: Zrc20Engine,
     names: NamesEngine,
+    zrc721: Zrc721Engine,
 }
 
 impl Indexer {
     pub fn new(rpc: ZcashRpcClient, db: Db) -> Self {
         let zrc20 = Zrc20Engine::new(db.clone());
         let names = NamesEngine::new(db.clone());
+        let zrc721 = Zrc721Engine::new(db.clone());
         Self {
             rpc,
             db,
             zrc20,
             names,
+            zrc721,
         }
     }
 
@@ -149,7 +153,6 @@ impl Indexer {
                             );
                         }
 
-                        // JSON blobs may encode ZRC-20 ops; hand them to the engine
                         if content_type == "application/json" {
                             if let Err(e) = self.zrc20.process(
                                 "inscribe",
@@ -159,6 +162,15 @@ impl Indexer {
                                 &content,
                             ) {
                                 tracing::debug!("Not a valid ZRC-20 operation: {}", e);
+                            }
+
+                            if let Err(e) = self.zrc721.process(
+                                "inscribe",
+                                &inscription_id,
+                                &sender,
+                                &content,
+                            ) {
+                                tracing::debug!("Not a valid ZRC-721 operation: {}", e);
                             }
                         }
 
@@ -184,6 +196,7 @@ impl Indexer {
         self.db.insert_block(height, &hash)?;
         let _ = self.db.set_status("zrc20_height", height);
         let _ = self.db.set_status("names_height", height);
+        let _ = self.db.set_status("zrc721_height", height);
         Ok(())
     }
 

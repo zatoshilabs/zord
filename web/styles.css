@@ -35,6 +35,14 @@ main {
     gap: 16px;
 }
 
+.inscription-main {
+    max-width: 960px;
+    margin: 30px auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+}
+
 header.bar {
     display: flex;
     flex-wrap: wrap;

@@ -5,6 +5,7 @@ mod names;
 mod rpc;
 mod zmq;
 mod zrc20;
+mod zrc721;
 
 use anyhow::Result;
 use std::env;

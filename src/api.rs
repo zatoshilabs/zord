@@ -72,6 +72,26 @@ struct TokenSummary {
 }
 
 #[derive(Serialize)]
+struct Zrc721CollectionSummary {
+    tick: String,
+    name: String,
+    symbol: String,
+    max: String,
+    minted: u64,
+    deployer: String,
+    inscription_id: String,
+}
+
+#[derive(Serialize)]
+struct Zrc721TokenSummary {
+    tick: String,
+    token_id: String,
+    owner: String,
+    inscription_id: String,
+    metadata: serde_json::Value,
+}
+
+#[derive(Serialize)]
 struct NameSummary {
     name: String,
     owner: String,
@@ -86,6 +106,8 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/", get(frontpage))
         .route("/tokens", get(tokens_page))
         .route("/names", get(names_page))
+        .route("/collections", get(collections_page))
+        .route("/zrc721", get(collections_page))
         .route("/docs", get(docs_page))
         .route("/spec", get(spec_page))
         .route("/api", get(api_docs))
@@ -100,6 +122,14 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/api/v1/zrc20/token/:tick/balances", get(get_zrc20_token_balances))
         .route("/api/v1/zrc20/address/:address", get(get_zrc20_address_balances))
         .route("/api/v1/zrc20/transfer/:id", get(get_zrc20_transfer))
+        .route("/api/v1/zrc721/status", get(get_zrc721_status))
+        .route("/api/v1/zrc721/collections", get(get_zrc721_collections))
+        .route("/api/v1/zrc721/collection/:tick", get(get_zrc721_collection))
+        .route(
+            "/api/v1/zrc721/collection/:tick/tokens",
+            get(get_zrc721_collection_tokens),
+        )
+        .route("/api/v1/zrc721/address/:address", get(get_zrc721_address_tokens))
         // Compatibility endpoints for Ord-style tools
         .route("/inscription/:id", get(get_inscription))
         .route("/inscriptions", get(get_recent_inscriptions))
@@ -497,6 +527,103 @@ async fn get_zrc20_transfer(
     Json(serde_json::json!({ "error": "Transfer not found" }))
 }
 
+async fn get_zrc721_collections(
+    State(state): State<AppState>,
+    Query(params): Query<PaginationParams>,
+) -> Json<serde_json::Value> {
+    let (page, limit) = params.resolve();
+    let rows = state
+        .db
+        .list_zrc721_collections(page, limit)
+        .unwrap_or_default();
+    let items: Vec<Zrc721CollectionSummary> = rows
+        .into_iter()
+        .filter_map(|(_tick, raw)| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .map(|info| Zrc721CollectionSummary {
+            tick: info["tick"].as_str().unwrap_or("").to_string(),
+            name: info["name"].as_str().unwrap_or("").to_string(),
+            symbol: info["symbol"].as_str().unwrap_or("").to_string(),
+            max: info["max"].as_str().unwrap_or("0").to_string(),
+            minted: info["minted"].as_u64().unwrap_or(0),
+            deployer: info["deployer"].as_str().unwrap_or("").to_string(),
+            inscription_id: info["inscription_id"].as_str().unwrap_or("").to_string(),
+        })
+        .collect();
+    Json(serde_json::json!({
+        "page": page,
+        "limit": limit,
+        "collections": items
+    }))
+}
+
+async fn get_zrc721_collection(
+    State(state): State<AppState>,
+    Path(tick): Path<String>,
+) -> Json<serde_json::Value> {
+    if let Some(raw) = state.db.get_zrc721_collection(&tick).unwrap_or(None) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+            return Json(val);
+        }
+    }
+    Json(serde_json::json!({ "error": "Collection not found" }))
+}
+
+async fn get_zrc721_collection_tokens(
+    State(state): State<AppState>,
+    Path(tick): Path<String>,
+    Query(params): Query<PaginationParams>,
+) -> Json<serde_json::Value> {
+    let (page, limit) = params.resolve();
+    let rows = state
+        .db
+        .list_zrc721_tokens(&tick, page, limit)
+        .unwrap_or_default();
+    let tokens: Vec<Zrc721TokenSummary> = rows
+        .into_iter()
+        .map(|token| Zrc721TokenSummary {
+            tick: token.tick,
+            token_id: token.token_id,
+            owner: token.owner,
+            inscription_id: token.inscription_id,
+            metadata: token.metadata,
+        })
+        .collect();
+    Json(serde_json::json!({
+        "tick": tick,
+        "page": page,
+        "limit": limit,
+        "tokens": tokens
+    }))
+}
+
+async fn get_zrc721_address_tokens(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+    Query(params): Query<PaginationParams>,
+) -> Json<serde_json::Value> {
+    let (page, limit) = params.resolve();
+    let rows = state
+        .db
+        .list_zrc721_tokens_by_address(&address, page, limit)
+        .unwrap_or_default();
+    let tokens: Vec<Zrc721TokenSummary> = rows
+        .into_iter()
+        .map(|token| Zrc721TokenSummary {
+            tick: token.tick,
+            token_id: token.token_id,
+            owner: token.owner,
+            inscription_id: token.inscription_id,
+            metadata: token.metadata,
+        })
+        .collect();
+    Json(serde_json::json!({
+        "address": address,
+        "page": page,
+        "limit": limit,
+        "tokens": tokens
+    }))
+}
+
 // Minimal HTML shells used by browsers
 
 async fn frontpage() -> Html<&'static str> {
@@ -514,6 +641,13 @@ async fn names_page() -> Html<String> {
     match std::fs::read_to_string("web/names.html") {
         Ok(content) => Html(content),
         Err(_) => Html("<p>names page missing</p>".to_string()),
+    }
+}
+
+async fn collections_page() -> Html<String> {
+    match std::fs::read_to_string("web/collections.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<p>collections page missing</p>".to_string()),
     }
 }
 
@@ -855,6 +989,19 @@ async fn get_zrc20_status(State(state): State<AppState>) -> Json<serde_json::Val
         "height": height,
         "chain_tip": chain_tip,
         "tokens": tokens,
+        "version": env!("CARGO_PKG_VERSION")
+    }))
+}
+
+async fn get_zrc721_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let (collections, tokens) = state.db.zrc721_counts().unwrap_or((0, 0));
+    let height = state.db.get_status("zrc721_height").unwrap_or(None);
+    let chain_tip = state.db.get_status("chain_tip").unwrap_or(None);
+    Json(serde_json::json!({
+        "collections": collections,
+        "tokens": tokens,
+        "height": height,
+        "chain_tip": chain_tip,
         "version": env!("CARGO_PKG_VERSION")
     }))
 }

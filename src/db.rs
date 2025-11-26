@@ -31,6 +31,9 @@ const STATUS: TableDefinition<&str, u64> = TableDefinition::new("status");
 
 // ZNS backing store
 const NAMES: TableDefinition<&str, &str> = TableDefinition::new("names");
+const ZRC721_COLLECTIONS: TableDefinition<&str, &str> =
+    TableDefinition::new("zrc721_collections");
+const ZRC721_TOKENS: TableDefinition<&str, &str> = TableDefinition::new("zrc721_tokens");
 
 #[derive(Clone)]
 /// Shared handle to the redb-backed state store.
@@ -42,6 +45,15 @@ pub struct Db {
 pub struct Balance {
     pub available: u128,
     pub overall: u128,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct Zrc721Token {
+    pub tick: String,
+    pub token_id: String,
+    pub owner: String,
+    pub inscription_id: String,
+    pub metadata: serde_json::Value,
 }
 
 impl Db {
@@ -73,7 +85,8 @@ impl Db {
             write_txn.open_table(STATS)?;
             write_txn.open_table(STATUS)?;
             write_txn.open_table(NAMES)?;
-            write_txn.open_table(STATUS)?;
+            write_txn.open_table(ZRC721_COLLECTIONS)?;
+            write_txn.open_table(ZRC721_TOKENS)?;
         }
         write_txn.commit()?;
 
@@ -354,6 +367,149 @@ impl Db {
         let table = read_txn.open_table(STATUS)?;
         let value = table.get(key)?.map(|v| v.value());
         Ok(value)
+    }
+
+    pub fn register_zrc721_collection(
+        &self,
+        tick: &str,
+        payload: &serde_json::Value,
+    ) -> Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(ZRC721_COLLECTIONS)?;
+            if table.get(tick)?.is_some() {
+                return Err(anyhow::anyhow!("Collection already exists"));
+            }
+            table.insert(tick, payload.to_string().as_str())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn get_zrc721_collection(&self, tick: &str) -> Result<Option<String>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(ZRC721_COLLECTIONS)?;
+        let val = table.get(tick)?.map(|v| v.value().to_string());
+        Ok(val)
+    }
+
+    pub fn list_zrc721_collections(&self, page: usize, limit: usize) -> Result<Vec<(String, String)>> {
+        let offset = page.saturating_mul(limit);
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(ZRC721_COLLECTIONS)?;
+        let mut rows = Vec::new();
+        for item in table.iter()?.rev().skip(offset).take(limit) {
+            let (k, v) = item?;
+            rows.push((k.value().to_string(), v.value().to_string()));
+        }
+        Ok(rows)
+    }
+
+    pub fn insert_zrc721_token(
+        &self,
+        tick: &str,
+        token_id: &str,
+        owner: &str,
+        inscription_id: &str,
+        metadata: &serde_json::Value,
+    ) -> Result<()> {
+        let key = format!("{}#{}", tick, token_id);
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut collections = write_txn.open_table(ZRC721_COLLECTIONS)?;
+            let mut tokens = write_txn.open_table(ZRC721_TOKENS)?;
+
+            if tokens.get(key.as_str())?.is_some() {
+                return Err(anyhow::anyhow!("Token already minted"));
+            }
+
+            let mut collection: serde_json::Value = match collections.get(tick)? {
+                Some(raw) => serde_json::from_str(raw.value())?,
+                None => return Err(anyhow::anyhow!("Collection not found")),
+            };
+            // Optional: enforce max supply of tokens per deployment when parsable
+            let current_minted = collection["minted"].as_u64().unwrap_or(0);
+            let max_allowed = collection["max"].as_str().and_then(|s| s.parse::<u64>().ok());
+            if let Some(max_total) = max_allowed {
+                if current_minted >= max_total {
+                    return Err(anyhow::anyhow!("Max token count reached"));
+                }
+                // Also enforce id range if numeric
+                if let Ok(id_num) = token_id.parse::<u64>() {
+                    if id_num == 0 || id_num > max_total {
+                        return Err(anyhow::anyhow!("Token id out of range"));
+                    }
+                }
+            }
+            let minted = current_minted + 1;
+            collection["minted"] = serde_json::json!(minted);
+            collections.insert(tick, collection.to_string().as_str())?;
+
+            let token = Zrc721Token {
+                tick: tick.to_string(),
+                token_id: token_id.to_string(),
+                owner: owner.to_string(),
+                inscription_id: inscription_id.to_string(),
+                metadata: metadata.clone(),
+            };
+            tokens.insert(key.as_str(), serde_json::to_string(&token)?.as_str())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn list_zrc721_tokens(
+        &self,
+        tick: &str,
+        page: usize,
+        limit: usize,
+    ) -> Result<Vec<Zrc721Token>> {
+        let offset = page.saturating_mul(limit);
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(ZRC721_TOKENS)?;
+        let mut rows = Vec::new();
+        for item in table.iter()? {
+            let (k, v) = item?;
+            let key = k.value();
+            if let Some((collection, _token)) = key.split_once('#') {
+                if collection == tick {
+                    let data: Zrc721Token = serde_json::from_str(v.value())?;
+                    rows.push(data);
+                }
+            }
+        }
+        rows.sort_by(|a, b| a.token_id.cmp(&b.token_id));
+        Ok(rows.into_iter().skip(offset).take(limit).collect())
+    }
+
+    pub fn list_zrc721_tokens_by_address(
+        &self,
+        address: &str,
+        page: usize,
+        limit: usize,
+    ) -> Result<Vec<Zrc721Token>> {
+        let offset = page.saturating_mul(limit);
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(ZRC721_TOKENS)?;
+        let mut rows = Vec::new();
+        for item in table.iter()? {
+            let (_k, v) = item?;
+            let data: Zrc721Token = serde_json::from_str(v.value())?;
+            if data.owner == address {
+                rows.push(data);
+            }
+        }
+        rows.sort_by(|a, b| a.tick.cmp(&b.tick).then(a.token_id.cmp(&b.token_id)));
+        Ok(rows.into_iter().skip(offset).take(limit).collect())
+    }
+
+    pub fn zrc721_counts(&self) -> Result<(usize, usize)> {
+        let read_txn = self.db.begin_read()?;
+        let collections = read_txn.open_table(ZRC721_COLLECTIONS)?;
+        let tokens = read_txn.open_table(ZRC721_TOKENS)?;
+        let collection_count = collections.len()? as usize;
+        let token_count = tokens.len()? as usize;
+        Ok((collection_count, token_count))
     }
 
     // Transfer inscription helpers

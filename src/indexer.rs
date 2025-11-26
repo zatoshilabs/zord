@@ -47,6 +47,7 @@ impl Indexer {
                 .get_latest_indexed_height()?
                 .unwrap_or(start_height - 1);
             let chain_height = self.rpc.get_block_count().await?;
+            let _ = self.db.set_status("chain_tip", chain_height);
 
             if current_height < chain_height {
                 let next_height = current_height + 1;
@@ -181,6 +182,8 @@ impl Indexer {
         // inscription ownership is needed beyond insert-time metadata
 
         self.db.insert_block(height, &hash)?;
+        let _ = self.db.set_status("zrc20_height", height);
+        let _ = self.db.set_status("names_height", height);
         Ok(())
     }
 

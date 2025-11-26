@@ -32,9 +32,30 @@
                 <li><code>GET /inscription/:id</code> (HTML)</li>
                 <li><code>GET /content/:id</code> (raw)</li>
                 <li><code>GET /preview/:id</code></li>
+                <li><code>GET /api/v1/zrc20/status</code></li>
+                <li><code>GET /api/v1/zrc20/token/:tick/balances</code></li>
+                <li><code>GET /api/v1/zrc20/address/:address</code></li>
+                <li><code>GET /api/v1/zrc20/transfer/:id</code></li>
+            </ul>
+        </section>
+        <section>
+            <h2>Marketplace workflow</h2>
+            <p>To list a ZRC-20 token for sale a wallet:</p>
+            <ol>
+                <li>Mints tokens using a standard inscription (<code>{"p":"zrc-20","op":"mint", ...}</code>).</li>
+                <li>Creates a transfer inscription that locks the amount.</li>
+                <li>Builds a PSBT using the locked inscription and publishes it once the deal is matched.</li>
+            </ol>
+            <p>Marketplaces verify balances and locks by calling:</p>
+            <ul>
+                <li><code>/api/v1/zrc20/token/:tick/balances</code> to inspect holders.</li>
+                <li><code>/api/v1/zrc20/address/:address</code> to show a seller’s portfolio.</li>
+                <li><code>/api/v1/zrc20/transfer/:id</code> to check the locked amount and whether the inscription has been consumed.</li>
             </ul>
         </section>
     </main>
+
+    <sync-footer></sync-footer>
 
     <script type="module" src="/static/app.js"></script>
 </body>

@@ -25,8 +25,9 @@ const ADDRESS_INSCRIPTIONS: TableDefinition<&str, &str> =
     TableDefinition::new("address_inscriptions");
 // Latest owner map for quick lookups
 const INSCRIPTION_STATE: TableDefinition<&str, &str> = TableDefinition::new("inscription_state");
-// Simple aggregate counters
+// Simple aggregate counters and status values
 const STATS: TableDefinition<&str, u64> = TableDefinition::new("stats");
+const STATUS: TableDefinition<&str, u64> = TableDefinition::new("status");
 
 // ZNS backing store
 const NAMES: TableDefinition<&str, &str> = TableDefinition::new("names");
@@ -44,12 +45,17 @@ pub struct Balance {
 }
 
 impl Db {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, reindex: bool) -> Result<Self> {
         let path = PathBuf::from(path.as_ref());
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 fs::create_dir_all(parent)?;
             }
+        }
+
+        if reindex && path.exists() {
+            tracing::warn!("RE_INDEX=TRUE deleting db at {:?}", path);
+            fs::remove_file(&path)?;
         }
 
         let db = Database::create(&path)?;
@@ -65,7 +71,9 @@ impl Db {
             write_txn.open_table(INSCRIPTION_NUMBERS)?;
             write_txn.open_table(ADDRESS_INSCRIPTIONS)?;
             write_txn.open_table(STATS)?;
+            write_txn.open_table(STATUS)?;
             write_txn.open_table(NAMES)?;
+            write_txn.open_table(STATUS)?;
         }
         write_txn.commit()?;
 
@@ -87,6 +95,9 @@ impl Db {
         {
             let mut table = write_txn.open_table(BLOCKS)?;
             table.insert(height, hash)?;
+
+            let mut status = write_txn.open_table(STATUS)?;
+            status.insert("core_height", height)?;
         }
         write_txn.commit()?;
         Ok(())
@@ -281,6 +292,66 @@ impl Db {
         }
         write_txn.commit()?;
         Ok(())
+    }
+
+    pub fn list_balances_for_tick(
+        &self,
+        tick: &str,
+        page: usize,
+        limit: usize,
+    ) -> Result<Vec<(String, Balance)>> {
+        let needle = tick.to_lowercase();
+        let offset = page.saturating_mul(limit);
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(BALANCES)?;
+        let mut rows = Vec::new();
+        for item in table.iter()? {
+            let (k, v) = item?;
+            let key = k.value();
+            if let Some((address, token)) = key.split_once(':') {
+                if token == needle {
+                    let bal = serde_json::from_str::<Balance>(v.value())?;
+                    rows.push((address.to_string(), bal));
+                }
+            }
+        }
+        rows.sort_by(|a, b| b.1.overall.cmp(&a.1.overall));
+        Ok(rows.into_iter().skip(offset).take(limit).collect())
+    }
+
+    pub fn list_balances_for_address(&self, address: &str) -> Result<Vec<(String, Balance)>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(BALANCES)?;
+        let mut rows = Vec::new();
+        for item in table.iter()? {
+            let (k, v) = item?;
+            let key = k.value();
+            if let Some((addr, token)) = key.split_once(':') {
+                if addr == address {
+                    let bal = serde_json::from_str::<Balance>(v.value())?;
+                    rows.push((token.to_string(), bal));
+                }
+            }
+        }
+        rows.sort_by(|a, b| b.1.overall.cmp(&a.1.overall));
+        Ok(rows)
+    }
+
+    pub fn set_status(&self, key: &str, value: u64) -> Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(STATUS)?;
+            table.insert(key, value)?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn get_status(&self, key: &str) -> Result<Option<u64>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(STATUS)?;
+        let value = table.get(key)?.map(|v| v.value());
+        Ok(value)
     }
 
     // Transfer inscription helpers

@@ -8,8 +8,16 @@ const numberFormatter = new Intl.NumberFormat('en-US');
 
 const kindFromContentType = (type = '') => {
     const lower = type.toLowerCase();
-    if (lower.includes('json')) return 'json';
+    if (lower === 'image/png') return 'png';
+    if (lower === 'image/jpeg' || lower === 'image/jpg') return 'jpeg';
+    if (lower === 'image/gif') return 'gif';
+    if (lower === 'image/svg+xml') return 'svg';
+    if (lower === 'text/html' || lower === 'application/xhtml+xml') return 'html';
+    if (lower === 'text/javascript' || lower === 'application/javascript') return 'javascript';
     if (lower.startsWith('text/')) return 'text';
+    if (lower.startsWith('audio/')) return 'audio';
+    if (lower.startsWith('video/')) return 'video';
+    if (lower.startsWith('model/')) return '3d';
     if (lower.startsWith('image/')) return 'image';
     return 'binary';
 };
@@ -44,6 +52,14 @@ const truncateAddress = (value = '', head = 6, tail = 4) => {
     if (!value) return 'unknown';
     if (value.length <= head + tail + 3) return value;
     return `${value.slice(0, head)}…${value.slice(-tail)}`;
+};
+
+const buildProgressBar = (value, tip) => {
+    if (!tip || tip === 0) return '░░░░░░░░░░░░░░░░░░░░ 0%';
+    const ratio = Math.max(0, Math.min(1, value / tip));
+    const segments = 20;
+    const filled = Math.round(ratio * segments);
+    return `${'█'.repeat(filled)}${'░'.repeat(segments - filled)} ${(ratio * 100).toFixed(1)}%`;
 };
 
 class PaginatedComponent extends HTMLElement {
@@ -139,8 +155,8 @@ class InscriptionFeed extends PaginatedComponent {
         this.grid.innerHTML = '';
 
         const filtered = this.items.filter((item) => {
-            const kind = kindFromContentType(item.content_type);
-            return this.typeFilter === 'all' || kind === this.typeFilter;
+            const bucket = (item.category || kindFromContentType(item.content_type)).toLowerCase();
+            return this.typeFilter === 'all' || bucket === this.typeFilter;
         });
 
         if (!filtered.length) {
@@ -149,7 +165,7 @@ class InscriptionFeed extends PaginatedComponent {
         }
 
         filtered.forEach((item) => {
-            const kind = kindFromContentType(item.content_type);
+            const kind = (item.category || kindFromContentType(item.content_type)).toLowerCase();
             const card = document.createElement('article');
             card.className = 'card';
             card.dataset.kind = kind;
@@ -162,11 +178,14 @@ class InscriptionFeed extends PaginatedComponent {
             header.appendChild(idLink);
 
             const typeTag = document.createElement('span');
-            typeTag.textContent = kind;
+            typeTag.textContent = kind.toUpperCase();
             header.appendChild(typeTag);
             card.appendChild(header);
 
-            if (kind === 'json') {
+            const lowerType = (item.content_type || '').toLowerCase();
+            const isJson = lowerType.includes('json');
+
+            if (isJson) {
                 const pre = document.createElement('pre');
                 pre.textContent = 'loading json…';
                 card.appendChild(pre);
@@ -372,6 +391,56 @@ customElements.define('inscription-feed', InscriptionFeed);
 customElements.define('token-table', TokenTable);
 customElements.define('name-table', NameTable);
 customElements.define('zord-status', ZordStatus);
+class SyncFooter extends HTMLElement {
+    connectedCallback() {
+        this.renderPlaceholder();
+        this.refresh();
+        this.timer = setInterval(() => this.refresh(), 8000);
+    }
+
+    disconnectedCallback() {
+        clearInterval(this.timer);
+    }
+
+    renderPlaceholder() {
+        this.className = 'sync-footer';
+        this.textContent = 'syncing…';
+    }
+
+    async refresh() {
+        try {
+            const res = await fetch('/api/v1/status');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            this.render(data);
+        } catch (err) {
+            this.textContent = 'status offline';
+        }
+    }
+
+    render(data) {
+        this.innerHTML = '';
+        const components = data.components || {};
+        const entries = [
+            ['core', components.core || {}],
+            ['zrc20', components.zrc20 || {}],
+            ['names', components.names || {}],
+        ];
+        entries.forEach(([label, info]) => {
+            const seg = document.createElement('div');
+            seg.className = 'sync-segment';
+            const bar = document.createElement('span');
+            bar.className = 'sync-bar';
+            bar.textContent = buildProgressBar(info.height || 0, info.tip || 0);
+            const text = document.createElement('span');
+            text.textContent = label;
+            seg.appendChild(text);
+            seg.appendChild(bar);
+            this.appendChild(seg);
+        });
+    }
+}
+customElements.define('sync-footer', SyncFooter);
 
 (function registerActions() {
     document.addEventListener('click', (event) => {
@@ -385,12 +454,16 @@ customElements.define('zord-status', ZordStatus);
         element.go(delta);
     });
 
-    const typeFilter = document.getElementById('type-filter');
-    if (typeFilter) {
-        typeFilter.addEventListener('change', (event) => {
+    const chipRow = document.getElementById('type-filter');
+    if (chipRow) {
+        chipRow.addEventListener('click', (event) => {
+            const button = event.target.closest('button[data-kind]');
+            if (!button) return;
+            chipRow.querySelectorAll('.chip').forEach((chip) => chip.classList.remove('active'));
+            button.classList.add('active');
             const feed = document.querySelector('inscription-feed');
             if (feed && typeof feed.setTypeFilter === 'function') {
-                feed.setTypeFilter(event.target.value);
+                feed.setTypeFilter(button.dataset.kind);
             }
         });
     }

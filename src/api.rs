@@ -53,6 +53,7 @@ struct InscriptionSummary {
     block_height: Option<u64>,
     content_length: usize,
     shielded: bool,
+    category: String,
     preview_text: Option<String>,
 }
 
@@ -93,6 +94,12 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/api/v1/tokens", get(get_tokens_feed))
         .route("/api/v1/names", get(get_names_feed))
         .route("/api/v1/status", get(get_status))
+        .route("/api/v1/zrc20/status", get(get_zrc20_status))
+        .route("/api/v1/zrc20/tokens", get(get_tokens_feed))
+        .route("/api/v1/zrc20/token/:tick", get(get_token_info))
+        .route("/api/v1/zrc20/token/:tick/balances", get(get_zrc20_token_balances))
+        .route("/api/v1/zrc20/address/:address", get(get_zrc20_address_balances))
+        .route("/api/v1/zrc20/transfer/:id", get(get_zrc20_transfer))
         // Compatibility endpoints for Ord-style tools
         .route("/inscription/:id", get(get_inscription))
         .route("/inscriptions", get(get_recent_inscriptions))
@@ -199,6 +206,8 @@ async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) 
     let content_length_bytes = content_hex.len() / 2;
     let size_display = format_byte_size(content_length_bytes);
     let timestamp_display = block_time.map(format_timestamp).unwrap_or_else(|| "—".into());
+    let category = classify_mime(content_type_raw);
+    let content_encoding = val["content_encoding"].as_str().map(|s| s.to_string());
 
     let content_preview = if content_type_raw.starts_with("image/") {
         let rendering = if matches!(content_type_raw, "image/avif" | "image/jxl") {
@@ -252,46 +261,20 @@ async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) 
     let content_link = format!("<a href=\"/content/{id}\" target=\"_blank\" rel=\"noreferrer\">Download raw</a>", id = id_attr);
 
     let mut rows = Vec::new();
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>ID</span><strong><code>{}</code></strong></div>"#,
-        id_text
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Content type</span><strong>{}</strong></div>"#,
-        content_type
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Size</span><strong>{}</strong></div>"#,
-        size_display
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Sender</span><strong><code>{}</code></strong></div>"#,
-        sender
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Receiver</span><strong><code>{}</code></strong></div>"#,
-        receiver
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Block height</span><strong>{}</strong></div>"#,
-        block_link
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Timestamp</span><strong>{}</strong></div>"#,
-        timestamp_display
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Transaction</span><strong>{}</strong></div>"#,
-        tx_link
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Preview</span><strong>{}</strong></div>"#,
-        preview_link
-    ));
-    rows.push(format!(
-        r#"<div class=\"meta-row\"><span>Content</span><strong>{}</strong></div>"#,
-        content_link
-    ));
+    rows.push(format!("<dt>ID</dt><dd><code>{}</code></dd>", id_text));
+    rows.push(format!("<dt>Content type</dt><dd>{}</dd>", content_type));
+    if let Some(enc) = content_encoding {
+        rows.push(format!("<dt>Encoding</dt><dd>{}</dd>", enc));
+    }
+    rows.push(format!("<dt>Category</dt><dd>{}</dd>", category.to_uppercase()));
+    rows.push(format!("<dt>Size</dt><dd>{}</dd>", size_display));
+    rows.push(format!("<dt>Sender</dt><dd><code>{}</code></dd>", sender));
+    rows.push(format!("<dt>Receiver</dt><dd><code>{}</code></dd>", receiver));
+    rows.push(format!("<dt>Block height</dt><dd>{}</dd>", block_link));
+    rows.push(format!("<dt>Timestamp</dt><dd>{}</dd>", timestamp_display));
+    rows.push(format!("<dt>Transaction</dt><dd>{}</dd>", tx_link));
+    rows.push(format!("<dt>Preview</dt><dd>{}</dd>", preview_link));
+    rows.push(format!("<dt>Content</dt><dd>{}</dd>", content_link));
     let meta_rows = rows.join("\n");
 
     let html = format!(
@@ -306,7 +289,7 @@ async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) 
     <link href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap\" rel=\"stylesheet\">
     <link rel=\"stylesheet\" href=\"/static/styles.css\">
 </head>
-<body>
+<body class=\"inscription-page\">
     <header class=\"bar\">
         <nav>
             <a href=\"/\" class=\"active\">inscriptions</a>
@@ -318,13 +301,18 @@ async fn get_inscription(State(state): State<AppState>, Path(id): Path<String>) 
         <zord-status></zord-status>
     </header>
 
-    <main class=\"detail\">
-        {preview}
-        <div class=\"meta-list\">
+    <main class=\"inscription-main\">
+        <section class=\"inscription-preview\">
+            {preview}
+        </section>
+        <section class=\"inscription-meta\">
+            <dl class=\"meta-grid\">
             {rows}
-        </div>
+            </dl>
+        </section>
     </main>
 
+    <sync-footer></sync-footer>
     <script type=\"module\" src=\"/static/app.js\"></script>
 </body>
 </html>"#,
@@ -440,6 +428,74 @@ async fn get_balance(
     }))
 }
 
+async fn get_zrc20_token_balances(
+    State(state): State<AppState>,
+    Path(tick): Path<String>,
+    Query(params): Query<PaginationParams>,
+) -> Json<serde_json::Value> {
+    let (page, limit) = params.resolve();
+    let rows = state
+        .db
+        .list_balances_for_tick(&tick, page, limit)
+        .unwrap_or_default();
+    let holders: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(address, bal)| {
+            serde_json::json!({
+                "address": address,
+                "available": bal.available.to_string(),
+                "overall": bal.overall.to_string(),
+            })
+        })
+        .collect();
+    Json(serde_json::json!({
+        "tick": tick,
+        "page": page,
+        "limit": limit,
+        "holders": holders
+    }))
+}
+
+async fn get_zrc20_address_balances(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+) -> Json<serde_json::Value> {
+    let rows = state
+        .db
+        .list_balances_for_address(&address)
+        .unwrap_or_default();
+    let entries: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(tick, bal)| {
+            serde_json::json!({
+                "tick": tick,
+                "available": bal.available.to_string(),
+                "overall": bal.overall.to_string(),
+            })
+        })
+        .collect();
+    Json(serde_json::json!({
+        "address": address,
+        "balances": entries
+    }))
+}
+
+async fn get_zrc20_transfer(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    if let Some(raw) = state.db.get_transfer_inscription(&id).unwrap_or(None) {
+        let used = state.db.is_inscription_used(&id).unwrap_or(false);
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+        return Json(serde_json::json!({
+            "inscription_id": id,
+            "transfer": parsed,
+            "used": used
+        }));
+    }
+    Json(serde_json::json!({ "error": "Transfer not found" }))
+}
+
 // Minimal HTML shells used by browsers
 
 async fn frontpage() -> Html<&'static str> {
@@ -507,6 +563,7 @@ async fn get_inscriptions_feed(
             .map(|hex| hex.len() / 2)
             .unwrap_or(0);
         let shielded = parsed["sender"].as_str().map(|addr| addr.starts_with('z')).unwrap_or(false);
+        let category = classify_mime(&content_type).to_string();
         let preview_text = build_preview(&content_type, &parsed);
 
         items.push(InscriptionSummary {
@@ -518,6 +575,7 @@ async fn get_inscriptions_feed(
             block_height,
             content_length,
             shielded,
+            category,
             preview_text,
         });
     }
@@ -768,6 +826,9 @@ async fn get_status(State(state): State<AppState>) -> Json<serde_json::Value> {
     let inscriptions = state.db.get_inscription_count().unwrap_or(0);
     let tokens = state.db.get_token_count().unwrap_or(0);
     let names = state.db.get_name_count().unwrap_or(0);
+    let chain_tip = state.db.get_status("chain_tip").unwrap_or(None);
+    let zrc20_height = state.db.get_status("zrc20_height").unwrap_or(None);
+    let names_height = state.db.get_status("names_height").unwrap_or(None);
 
     Json(serde_json::json!({
         "height": height,
@@ -775,6 +836,24 @@ async fn get_status(State(state): State<AppState>) -> Json<serde_json::Value> {
         "tokens": tokens,
         "names": names,
         "synced": true,
+        "version": env!("CARGO_PKG_VERSION"),
+        "chain_tip": chain_tip,
+        "components": {
+            "core": { "height": height, "tip": chain_tip },
+            "zrc20": { "height": zrc20_height, "tip": chain_tip },
+            "names": { "height": names_height, "tip": chain_tip },
+        }
+    }))
+}
+
+async fn get_zrc20_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let height = state.db.get_status("zrc20_height").unwrap_or(None);
+    let chain_tip = state.db.get_status("chain_tip").unwrap_or(None);
+    let tokens = state.db.get_token_count().unwrap_or(0);
+    Json(serde_json::json!({
+        "height": height,
+        "chain_tip": chain_tip,
+        "tokens": tokens,
         "version": env!("CARGO_PKG_VERSION")
     }))
 }
@@ -943,6 +1022,35 @@ fn format_supply_string(base_units: &str, decimals: u32) -> String {
 
 fn parse_u128(value: &str) -> u128 {
     value.parse::<u128>().unwrap_or(0)
+}
+
+fn classify_mime(content_type: &str) -> &'static str {
+    let lower = content_type.to_lowercase();
+    if lower == "image/png" {
+        "png"
+    } else if lower == "image/jpeg" || lower == "image/jpg" {
+        "jpeg"
+    } else if lower == "image/gif" {
+        "gif"
+    } else if lower == "image/svg+xml" {
+        "svg"
+    } else if lower == "text/html" || lower == "application/xhtml+xml" {
+        "html"
+    } else if lower == "text/javascript" || lower == "application/javascript" {
+        "javascript"
+    } else if lower.starts_with("text/") {
+        "text"
+    } else if lower.starts_with("audio/") {
+        "audio"
+    } else if lower.starts_with("video/") {
+        "video"
+    } else if lower.starts_with("model/") {
+        "3d"
+    } else if lower.starts_with("image/") {
+        "image"
+    } else {
+        "binary"
+    }
 }
 
 // ZNS helper endpoints

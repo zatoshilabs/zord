@@ -23,13 +23,19 @@
 
     <main>
         <section class="controls">
-            <label>type <select id="type-filter">
-                <option value="all">all</option>
-                <option value="json">json</option>
-                <option value="text">text</option>
-                <option value="image">image</option>
-                <option value="binary">binary</option>
-            </select></label>
+            <div class="chip-row" id="type-filter">
+                <button type="button" data-kind="all" class="chip active">ALL</button>
+                <button type="button" data-kind="text" class="chip">TEXT</button>
+                <button type="button" data-kind="png" class="chip">PNG</button>
+                <button type="button" data-kind="jpeg" class="chip">JPEG</button>
+                <button type="button" data-kind="html" class="chip">HTML</button>
+                <button type="button" data-kind="javascript" class="chip">JAVASCRIPT</button>
+                <button type="button" data-kind="svg" class="chip">SVG</button>
+                <button type="button" data-kind="gif" class="chip">GIF</button>
+                <button type="button" data-kind="3d" class="chip">3D</button>
+                <button type="button" data-kind="video" class="chip">VIDEO</button>
+                <button type="button" data-kind="audio" class="chip">AUDIO</button>
+            </div>
             <div class="pager">
                 <button data-target="inscriptions" data-action="prev">prev</button>
                 <button data-target="inscriptions" data-action="next">next</button>
@@ -42,7 +48,7 @@
             <span class="flag transparent">transparent</span>
         </div>
     </main>
-
+    <sync-footer></sync-footer>
     <script type="module" src="/static/app.js"></script>
 </body>
 </html>

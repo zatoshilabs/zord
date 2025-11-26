@@ -33,7 +33,10 @@ async fn main() -> Result<()> {
         .parse::<u16>()?;
 
     // Construct core services
-    let db = db::Db::new(&db_path)?;
+    let reindex = env::var("RE_INDEX")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false);
+    let db = db::Db::new(&db_path, reindex)?;
     let rpc = rpc::ZcashRpcClient::new();
     let indexer = indexer::Indexer::new(rpc, db.clone());
 

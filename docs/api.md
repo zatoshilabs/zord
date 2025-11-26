@@ -41,7 +41,7 @@ Notes on amounts
 - Transfer inspection
   - GET `/api/v1/zrc20/transfer/:id` → `{ inscription_id, transfer:{ tick, amt, sender }, used, outpoint? }`
 - Integrity
-  - GET `/api/v1/zrc20/token/:tick/integrity` → `{ supply_base_units, sum_overall_base_units, sum_available_base_units, total_holders, consistent }`
+  - GET `/api/v1/zrc20/token/:tick/integrity` → `{ supply_base_units, sum_overall_base_units, sum_available_base_units, burned_base_units, total_holders, consistent }`
 - Status
   - GET `/api/v1/zrc20/status` → `{ height, chain_tip, tokens, version }`
 - Compatibility

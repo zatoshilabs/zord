@@ -479,7 +479,8 @@ async fn get_zrc20_token_summary(
                 .db
                 .count_completed_transfers_for_tick(&lower)
                 .unwrap_or(0);
-            let consistent = parse_u128(&supply_base) == sum_overall;
+            let burned = state.db.get_burned(&lower).unwrap_or(0);
+            let consistent = parse_u128(&supply_base) == sum_overall + burned;
             return Json(serde_json::json!({
                 "tick": lower,
                 "dec": dec,
@@ -488,7 +489,7 @@ async fn get_zrc20_token_summary(
                 "transfers_completed": transfers_completed,
                 "max": max,
                 "lim": lim,
-                "integrity": { "consistent": consistent, "sum_holders_base_units": sum_overall.to_string() }
+                "integrity": { "consistent": consistent, "sum_holders_base_units": sum_overall.to_string(), "burned_base_units": burned.to_string() }
             }));
         }
     }
@@ -625,8 +626,9 @@ async fn get_zrc20_token_integrity(
             let dec = info["dec"].as_str().unwrap_or("18");
             let (sum_overall, sum_available, holders) =
                 state.db.sum_balances_for_tick(&lower).unwrap_or((0, 0, 0));
+            let burned = state.db.get_burned(&lower).unwrap_or(0);
             let supply = parse_u128(&supply_base);
-            let consistent = supply == sum_overall;
+            let consistent = supply == sum_overall + burned;
             return Json(serde_json::json!({
                 "tick": lower,
                 "dec": dec,
@@ -634,6 +636,7 @@ async fn get_zrc20_token_integrity(
                 "sum_overall_base_units": sum_overall.to_string(),
                 "sum_available_base_units": sum_available.to_string(),
                 "total_holders": holders,
+                "burned_base_units": burned.to_string(),
                 "consistent": consistent
             }));
         }

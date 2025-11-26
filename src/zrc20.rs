@@ -319,16 +319,22 @@ impl Zrc20Engine {
             .as_str()
             .ok_or(anyhow::anyhow!("Invalid sender"))?;
 
-        let receiver = receiver.unwrap_or(sender); // default to self when reveal spends locally
-
-        if receiver == sender {
-            // Unlock the funds if they ultimately returned to sender
-            self.db.update_balance(sender, tick, amt as i128, 0)?;
-        } else {
-            // Move value to the receiver and debit the sender
+        // If no transparent receiver detected, treat as shielded burn
+        if receiver.is_none() {
+            // Burn: reduce sender's overall by amt; do not unlock available; add to burned tally
             self.db.update_balance(sender, tick, 0, -(amt as i128))?;
-            self.db
-                .update_balance(receiver, tick, amt as i128, amt as i128)?;
+            self.db.add_burned(tick, amt)?;
+        } else {
+            let receiver = receiver.unwrap();
+            if receiver == sender {
+                // Unlock the funds if they ultimately returned to sender
+                self.db.update_balance(sender, tick, amt as i128, 0)?;
+            } else {
+                // Move value to the receiver and debit the sender
+                self.db.update_balance(sender, tick, 0, -(amt as i128))?;
+                self.db
+                    .update_balance(receiver, tick, amt as i128, amt as i128)?;
+            }
         }
 
         // Flag the inscription so reveal cannot replay

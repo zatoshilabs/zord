@@ -227,10 +227,9 @@ impl Zrc20Engine {
             token_info["lim"].as_str().unwrap_or("0"),
             token_info["dec"].as_str().unwrap_or("18"),
         )?;
-        let current_supply: u128 = self.parse_amount(
-            token_info["supply"].as_str().unwrap_or("0"),
-            token_info["dec"].as_str().unwrap_or("18"),
-        )?;
+        let current_supply: u128 = token_info["supply"].as_str()
+            .and_then(|s| s.parse::<u128>().ok())
+            .unwrap_or(0);
         let amt: u128 = self.parse_amount(amt_str, token_info["dec"].as_str().unwrap_or("18"))?;
 
         // Ensure mint fits within per-address limit and total supply

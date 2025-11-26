@@ -40,6 +40,13 @@ impl NamesEngine {
             return Err(anyhow::anyhow!("Name must end with .zec or .zcash"));
         }
 
+        // Must be a single token: reject any internal whitespace (spaces, tabs, newlines, etc.)
+        if name.chars().any(|c| c.is_whitespace()) {
+            return Err(anyhow::anyhow!(
+                "Name content must be a single token without spaces (e.g., alice.zec)"
+            ));
+        }
+
         // Strip the extension for validation
         let base_name = if name.ends_with(".zcash") {
             &name[..name.len() - 6]
@@ -52,7 +59,7 @@ impl NamesEngine {
             return Err(anyhow::anyhow!("Name cannot be empty"));
         }
 
-        // DNS-style length guard
+        // Simple length guard
         if name.len() > 253 {
             return Err(anyhow::anyhow!("Name too long (max 253 characters)"));
         }

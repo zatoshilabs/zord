@@ -42,6 +42,7 @@
                         <th data-sort="token_id">Token ID</th>
                         <th data-sort="owner">Owner</th>
                         <th>Inscription</th>
+                        <th>Metadata</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -83,6 +84,15 @@
                 const linkTd = document.createElement('td');
                 const a = document.createElement('a'); a.href = `/inscription/${t.inscription_id}`; a.textContent = t.inscription_id.slice(0,8)+'…'; linkTd.appendChild(a);
                 tr.appendChild(linkTd);
+                const metaTd = document.createElement('td');
+                if (t.metadata_path) {
+                    const m = document.createElement('a');
+                    m.href = t.metadata_path.replace('ipfs://','https://ipfs.io/ipfs/');
+                    m.textContent = 'metadata.json';
+                    m.target = '_blank';
+                    metaTd.appendChild(m);
+                } else { metaTd.textContent = ''; }
+                tr.appendChild(metaTd);
                 tbody.appendChild(tr);
             });
         }
@@ -113,4 +123,3 @@
     </script>
 </body>
 </html>
-

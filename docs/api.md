@@ -53,7 +53,7 @@ Notes on amounts
   - GET `/api/v1/zrc721/collections?page=&limit=` → `{ collections:[ { collection, supply, minted, meta, royalty, deployer, inscription_id } ] }`
   - GET `/api/v1/zrc721/collection/:collection` → deploy record
 - Tokens
-  - GET `/api/v1/zrc721/collection/:collection/tokens?page=&limit=` → `{ tokens:[ { collection, token_id, owner, inscription_id, metadata } ] }`
+  - GET `/api/v1/zrc721/collection/:collection/tokens?page=&limit=` → `{ tokens:[ { collection, token_id, owner, inscription_id, metadata, metadata_path } ] }`
   - GET `/api/v1/zrc721/address/:address` → `{ tokens:[ ... ] }`
 - Status
   - GET `/api/v1/zrc721/status` → `{ collections, tokens, height, chain_tip, version }`

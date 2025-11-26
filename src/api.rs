@@ -91,6 +91,7 @@ struct Zrc721TokenSummary {
     owner: String,
     inscription_id: String,
     metadata: serde_json::Value,
+    metadata_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -691,14 +692,29 @@ async fn get_zrc721_collection_tokens(
         .db
         .list_zrc721_tokens(&tick, page, limit)
         .unwrap_or_default();
+    // Try to fetch collection meta (CID) to derive metadata path
+    let meta_cid = state
+        .db
+        .get_zrc721_collection(&tick)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v["meta"].as_str().map(|s| s.to_string()));
+
     let tokens: Vec<Zrc721TokenSummary> = rows
         .into_iter()
-        .map(|token| Zrc721TokenSummary {
-            tick: token.tick,
-            token_id: token.token_id,
-            owner: token.owner,
-            inscription_id: token.inscription_id,
-            metadata: token.metadata,
+        .map(|token| {
+            let metadata_path = meta_cid
+                .as_ref()
+                .map(|cid| format!("ipfs://{}/{}.json", cid, token.token_id));
+            Zrc721TokenSummary {
+                tick: token.tick,
+                token_id: token.token_id,
+                owner: token.owner,
+                inscription_id: token.inscription_id,
+                metadata: token.metadata,
+                metadata_path,
+            }
         })
         .collect();
     Json(serde_json::json!({
@@ -719,14 +735,28 @@ async fn get_zrc721_address_tokens(
         .db
         .list_zrc721_tokens_by_address(&address, page, limit)
         .unwrap_or_default();
+    // Derive metadata path if meta CID is available for each token's collection
     let tokens: Vec<Zrc721TokenSummary> = rows
         .into_iter()
-        .map(|token| Zrc721TokenSummary {
-            tick: token.tick,
-            token_id: token.token_id,
-            owner: token.owner,
-            inscription_id: token.inscription_id,
-            metadata: token.metadata,
+        .map(|token| {
+            let meta_cid = state
+                .db
+                .get_zrc721_collection(&token.tick)
+                .ok()
+                .flatten()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|v| v["meta"].as_str().map(|s| s.to_string()));
+            let metadata_path = meta_cid
+                .as_ref()
+                .map(|cid| format!("ipfs://{}/{}.json", cid, token.token_id));
+            Zrc721TokenSummary {
+                tick: token.tick,
+                token_id: token.token_id,
+                owner: token.owner,
+                inscription_id: token.inscription_id,
+                metadata: token.metadata,
+                metadata_path,
+            }
         })
         .collect();
     Json(serde_json::json!({

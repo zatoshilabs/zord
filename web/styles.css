@@ -140,6 +140,8 @@ inscription-feed { display: block; }
 }
 
 .card header span { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+.card.shielded { border-color: var(--warn); }
+.card.shielded header span { color: var(--warn); }
 
 .card pre,
 .card code {
@@ -169,6 +171,9 @@ inscription-feed { display: block; }
     border-radius: 3px;
     text-transform: uppercase;
 }
+
+.card footer .badge-shielded { border-color: var(--warn); color: var(--warn); }
+.card footer .badge-transparent { border-color: var(--line); color: var(--muted); }
 
 .loading,
 .empty { text-align: center; color: var(--muted); padding: 20px 0; }

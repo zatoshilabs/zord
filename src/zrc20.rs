@@ -219,19 +219,19 @@ impl Zrc20Engine {
             .ok_or(anyhow::anyhow!("Token not found"))?;
         let token_info: serde_json::Value = serde_json::from_str(&token_info_str)?;
 
-        let max: u64 = self.parse_amount(
+        let max: u128 = self.parse_amount(
             token_info["max"].as_str().unwrap_or("0"),
             token_info["dec"].as_str().unwrap_or("18"),
         )?;
-        let lim: u64 = self.parse_amount(
+        let lim: u128 = self.parse_amount(
             token_info["lim"].as_str().unwrap_or("0"),
             token_info["dec"].as_str().unwrap_or("18"),
         )?;
-        let current_supply: u64 = self.parse_amount(
+        let current_supply: u128 = self.parse_amount(
             token_info["supply"].as_str().unwrap_or("0"),
             token_info["dec"].as_str().unwrap_or("18"),
         )?;
-        let amt: u64 = self.parse_amount(amt_str, token_info["dec"].as_str().unwrap_or("18"))?;
+        let amt: u128 = self.parse_amount(amt_str, token_info["dec"].as_str().unwrap_or("18"))?;
 
         // Ensure mint fits within per-address limit and total supply
         if amt > lim {
@@ -248,7 +248,7 @@ impl Zrc20Engine {
 
         // Credit both spendable and overall balances for the minter
         self.db
-            .update_balance(minter, &op.tick.to_lowercase(), amt as i64, amt as i64)?;
+            .update_balance(minter, &op.tick.to_lowercase(), amt as i128, amt as i128)?;
 
         Ok(())
     }
@@ -267,7 +267,7 @@ impl Zrc20Engine {
             .get_token_info(&op.tick.to_lowercase())?
             .ok_or(anyhow::anyhow!("Token not found"))?;
         let token_info: serde_json::Value = serde_json::from_str(&token_info_str)?;
-        let amt: u64 = self.parse_amount(amt_str, token_info["dec"].as_str().unwrap_or("18"))?;
+        let amt: u128 = self.parse_amount(amt_str, token_info["dec"].as_str().unwrap_or("18"))?;
 
         // Require unlocked balance before staging the transfer
         let balance = self.db.get_balance(sender, &op.tick.to_lowercase())?;
@@ -278,7 +278,7 @@ impl Zrc20Engine {
         // Record the intent so the reveal can settle it later
         let transfer_data = serde_json::json!({
             "tick": op.tick.to_lowercase(),
-            "amt": amt,
+            "amt": amt.to_string(),
             "sender": sender
         });
 
@@ -287,7 +287,7 @@ impl Zrc20Engine {
 
         // Lock the amount by reducing only the spendable balance
         self.db
-            .update_balance(sender, &op.tick.to_lowercase(), -(amt as i64), 0)?;
+            .update_balance(sender, &op.tick.to_lowercase(), -(amt as i128), 0)?;
 
         Ok(())
     }
@@ -309,8 +309,9 @@ impl Zrc20Engine {
             .as_str()
             .ok_or(anyhow::anyhow!("Invalid tick"))?;
         let amt = transfer_data["amt"]
-            .as_u64()
-            .ok_or(anyhow::anyhow!("Invalid amount"))?;
+            .as_str()
+            .ok_or(anyhow::anyhow!("Invalid amount"))?
+            .parse::<u128>()?;
         let sender = transfer_data["sender"]
             .as_str()
             .ok_or(anyhow::anyhow!("Invalid sender"))?;
@@ -319,12 +320,12 @@ impl Zrc20Engine {
 
         if receiver == sender {
             // Unlock the funds if they ultimately returned to sender
-            self.db.update_balance(sender, tick, amt as i64, 0)?;
+            self.db.update_balance(sender, tick, amt as i128, 0)?;
         } else {
             // Move value to the receiver and debit the sender
-            self.db.update_balance(sender, tick, 0, -(amt as i64))?;
+            self.db.update_balance(sender, tick, 0, -(amt as i128))?;
             self.db
-                .update_balance(receiver, tick, amt as i64, amt as i64)?;
+                .update_balance(receiver, tick, amt as i128, amt as i128)?;
         }
 
         // Flag the inscription so reveal cannot replay
@@ -334,7 +335,7 @@ impl Zrc20Engine {
     }
 
     /// Parse amount string with decimals support using overflow-safe arithmetic.
-    fn parse_amount(&self, amount_str: &str, decimals: &str) -> Result<u64> {
+    fn parse_amount(&self, amount_str: &str, decimals: &str) -> Result<u128> {
         let dec: u32 = decimals.parse().unwrap_or(18);
         let scale = 10u128.pow(dec);
 
@@ -370,10 +371,6 @@ impl Zrc20Engine {
             .checked_add(frac_value)
             .ok_or_else(|| anyhow::anyhow!("Amount exceeds maximum representable value"))?;
 
-        if total > u64::MAX as u128 {
-            return Err(anyhow::anyhow!("Amount exceeds u64 storage"));
-        }
-
-        Ok(total as u64)
+        Ok(total)
     }
 }

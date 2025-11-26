@@ -1,6 +1,6 @@
 use crate::db::Db;
 use crate::names::NamesEngine;
-use crate::rpc::ZcashRpcClient;
+use crate::rpc::{ScriptPubKey, ZcashRpcClient};
 use crate::zrc20::Zrc20Engine;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -261,19 +261,11 @@ impl Indexer {
                             content_hex.clone()
                         };
 
-                        // Use first vout address as a rough owner signal
-                        let sender = if let Some(first_vout) = tx.vout.first() {
-                            if let Some(addrs) = &first_vout.script_pub_key.addresses {
-                                addrs
-                                    .first()
-                                    .cloned()
-                                    .unwrap_or_else(|| "unknown".to_string())
-                            } else {
-                                "unknown".to_string()
-                            }
-                        } else {
-                            "unknown".to_string()
-                        };
+                        let (sender, _shielded) = tx
+                            .vout
+                            .first()
+                            .map(|vout| classify_address(&vout.script_pub_key))
+                            .unwrap_or_else(|| ("unknown".to_string(), false));
 
                         let receiver = sender.clone();
                         let inscription_id = format!("{}i0", txid);
@@ -300,4 +292,13 @@ impl Indexer {
 
         None
     }
+}
+
+fn classify_address(script: &ScriptPubKey) -> (String, bool) {
+    if let Some(addrs) = &script.addresses {
+        if let Some(addr) = addrs.first() {
+            return (addr.clone(), addr.starts_with('z'));
+        }
+    }
+    ("unknown".to_string(), false)
 }

@@ -572,17 +572,16 @@ async fn get_tokens_feed(
             let deployer = info["deployer"].as_str().unwrap_or("unknown").to_string();
             let inscription_id = info["inscription_id"].as_str().unwrap_or("").to_string();
             let supply_base_units = info["supply"].as_str().unwrap_or("0").to_string();
-            let supply_float = supply_base_units.parse::<f64>().unwrap_or(0.0);
-            let display_supply = format_decimal(supply_float / 10u64.pow(dec_value) as f64);
+            let display_supply = format_supply_string(&supply_base_units, dec_value);
             let max_base_units = parse_decimal_amount(&max, dec_value)
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| "0".to_string());
-            // Progress bar uses f64 since UI only needs approximate completion
-            let max_float = max_base_units.parse::<f64>().unwrap_or(0.0);
-            let progress = if max_float == 0.0 {
+            let max_units = parse_u128(&max_base_units);
+            let supply_units = parse_u128(&supply_base_units);
+            let progress = if max_units == 0 {
                 0.0
             } else {
-                (supply_float / max_float).clamp(0.0, 1.0)
+                (supply_units as f64 / max_units as f64).clamp(0.0, 1.0)
             };
 
             items.push(TokenSummary {
@@ -920,24 +919,30 @@ fn build_preview(content_type: &str, value: &serde_json::Value) -> Option<String
     }
 }
 
-fn format_decimal(value: f64) -> String {
-    if value == 0.0 {
-        return "0".to_string();
+fn format_supply_string(base_units: &str, decimals: u32) -> String {
+    let value = parse_u128(base_units);
+    if decimals == 0 {
+        return value.to_string();
     }
-
-    let mut formatted = format!("{:.8}", value);
-    while formatted.contains('.') && formatted.ends_with('0') {
-        formatted.pop();
+    let scale = 10u128.pow(decimals);
+    let whole = value / scale;
+    let frac = value % scale;
+    if frac == 0 {
+        return whole.to_string();
     }
-    if formatted.ends_with('.') {
-        formatted.pop();
+    let mut frac_str = format!("{:0width$}", frac, width = decimals as usize);
+    while frac_str.ends_with('0') {
+        frac_str.pop();
     }
-
-    if formatted.is_empty() {
-        "0".to_string()
+    if frac_str.is_empty() {
+        whole.to_string()
     } else {
-        formatted
+        format!("{}.{}", whole, frac_str)
     }
+}
+
+fn parse_u128(value: &str) -> u128 {
+    value.parse::<u128>().unwrap_or(0)
 }
 
 // ZNS helper endpoints

@@ -14,6 +14,12 @@ const kindFromContentType = (type = '') => {
     return 'binary';
 };
 
+const formatTimestamp = (seconds) => {
+    if (!seconds) return '—';
+    const date = new Date(seconds * 1000);
+    return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
+};
+
 const formatNumber = (value) => {
     if (value === null || value === undefined || Number.isNaN(value)) {
         return '—';
@@ -147,6 +153,7 @@ class InscriptionFeed extends PaginatedComponent {
             const card = document.createElement('article');
             card.className = 'card';
             card.dataset.kind = kind;
+            card.classList.add(item.shielded ? 'shielded' : 'transparent');
 
             const header = document.createElement('header');
             const idLink = document.createElement('a');
@@ -168,9 +175,9 @@ class InscriptionFeed extends PaginatedComponent {
                     .then((text) => {
                         try {
                             const pretty = JSON.stringify(JSON.parse(text), null, 2);
-                            pre.textContent = pretty.slice(0, 1200);
+                            pre.textContent = pretty.slice(0, 1600);
                         } catch (err) {
-                            pre.textContent = text.slice(0, 1200);
+                            pre.textContent = text.slice(0, 1600);
                         }
                     })
                     .catch(() => {
@@ -187,14 +194,28 @@ class InscriptionFeed extends PaginatedComponent {
             }
 
             const footer = document.createElement('footer');
+
             const addr = document.createElement('span');
             addr.textContent = truncateAddress(item.sender);
+            addr.className = `badge ${item.shielded ? 'badge-shielded' : 'badge-transparent'}`;
             footer.appendChild(addr);
-            if (item.block_height) {
-                const height = document.createElement('span');
-                height.textContent = `h${formatNumber(item.block_height)}`;
-                footer.appendChild(height);
-            }
+
+            const height = document.createElement('span');
+            height.textContent = item.block_height ? `h${formatNumber(item.block_height)}` : '—';
+            footer.appendChild(height);
+
+            const size = document.createElement('span');
+            size.textContent = formatBytes(item.content_length);
+            footer.appendChild(size);
+
+            const ts = document.createElement('span');
+            ts.textContent = formatTimestamp(item.block_time);
+            footer.appendChild(ts);
+
+            const tx = document.createElement('span');
+            tx.textContent = item.txid ? item.txid.slice(0, 10) + '…' : '—';
+            footer.appendChild(tx);
+
             card.appendChild(footer);
 
             this.grid.appendChild(card);

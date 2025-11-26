@@ -39,8 +39,8 @@ pub struct Db {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Balance {
-    pub available: u64,
-    pub overall: u64,
+    pub available: u128,
+    pub overall: u128,
 }
 
 impl Db {
@@ -203,7 +203,7 @@ impl Db {
         Ok(val)
     }
 
-    pub fn update_token_supply(&self, ticker: &str, new_supply: u64) -> Result<()> {
+    pub fn update_token_supply(&self, ticker: &str, new_supply: u128) -> Result<()> {
         let write_txn = self.db.begin_write()?;
         {
             let mut table = write_txn.open_table(TOKENS)?;
@@ -242,8 +242,8 @@ impl Db {
         &self,
         address: &str,
         ticker: &str,
-        available_delta: i64,
-        overall_delta: i64,
+        available_delta: i128,
+        overall_delta: i128,
     ) -> Result<()> {
         let key = format!("{}:{}", address, ticker);
         let write_txn = self.db.begin_write()?;
@@ -258,25 +258,23 @@ impl Db {
                 }
             };
 
-            // Standard saturating math
-            if available_delta < 0 && current.available < (-available_delta as u64) {
+            let next_available = (current.available as i128)
+                .checked_add(available_delta)
+                .ok_or_else(|| anyhow::anyhow!("Available balance overflow"))?;
+            if next_available < 0 {
                 return Err(anyhow::anyhow!("Insufficient available balance"));
             }
-            if overall_delta < 0 && current.overall < (-overall_delta as u64) {
+
+            let next_overall = (current.overall as i128)
+                .checked_add(overall_delta)
+                .ok_or_else(|| anyhow::anyhow!("Overall balance overflow"))?;
+            if next_overall < 0 {
                 return Err(anyhow::anyhow!("Insufficient overall balance"));
             }
 
             let new_balance = Balance {
-                available: if available_delta >= 0 {
-                    current.available + (available_delta as u64)
-                } else {
-                    current.available - (-available_delta as u64)
-                },
-                overall: if overall_delta >= 0 {
-                    current.overall + (overall_delta as u64)
-                } else {
-                    current.overall - (-overall_delta as u64)
-                },
+                available: next_available as u128,
+                overall: next_overall as u128,
             };
 
             table.insert(key.as_str(), serde_json::to_string(&new_balance)?.as_str())?;

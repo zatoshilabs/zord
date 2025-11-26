@@ -299,7 +299,7 @@ impl Db {
         tick: &str,
         page: usize,
         limit: usize,
-    ) -> Result<Vec<(String, Balance)>> {
+    ) -> Result<(Vec<(String, Balance)>, usize)> {
         let needle = tick.to_lowercase();
         let offset = page.saturating_mul(limit);
         let read_txn = self.db.begin_read()?;
@@ -316,7 +316,9 @@ impl Db {
             }
         }
         rows.sort_by(|a, b| b.1.overall.cmp(&a.1.overall));
-        Ok(rows.into_iter().skip(offset).take(limit).collect())
+        let total = rows.len();
+        let page_rows = rows.into_iter().skip(offset).take(limit).collect();
+        Ok((page_rows, total))
     }
 
     pub fn list_balances_for_address(&self, address: &str) -> Result<Vec<(String, Balance)>> {

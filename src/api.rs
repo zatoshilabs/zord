@@ -434,7 +434,7 @@ async fn get_zrc20_token_balances(
     Query(params): Query<PaginationParams>,
 ) -> Json<serde_json::Value> {
     let (page, limit) = params.resolve();
-    let rows = state
+    let (rows, total) = state
         .db
         .list_balances_for_tick(&tick, page, limit)
         .unwrap_or_default();
@@ -452,6 +452,7 @@ async fn get_zrc20_token_balances(
         "tick": tick,
         "page": page,
         "limit": limit,
+        "total_holders": total,
         "holders": holders
     }))
 }

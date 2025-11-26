@@ -12,13 +12,14 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
 const FRONT_HTML: &str = include_str!("../web/index.html");
-const MAX_PAGE_SIZE: usize = 200;
+const MAX_PAGE_SIZE: usize = 50000;
 
 #[derive(Deserialize)]
 struct PaginationParams {
     page: Option<usize>,
     limit: Option<usize>,
     q: Option<String>,
+    tld: Option<String>,
 }
 
 impl PaginationParams {
@@ -106,6 +107,8 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/", get(frontpage))
         .route("/tokens", get(tokens_page))
         .route("/names", get(names_page))
+        .route("/names/zec", get(names_zec_page))
+        .route("/names/zcash", get(names_zcash_page))
         .route("/collections", get(collections_page))
         .route("/zrc721", get(collections_page))
         .route("/docs", get(docs_page))
@@ -115,12 +118,23 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/api/v1/inscriptions", get(get_inscriptions_feed))
         .route("/api/v1/tokens", get(get_tokens_feed))
         .route("/api/v1/names", get(get_names_feed))
+        .route("/api/v1/names/zec", get(get_names_feed_zec))
+        .route("/api/v1/names/zcash", get(get_names_feed_zcash))
+        .route("/api/v1/names/address/:address", get(get_names_by_address))
         .route("/api/v1/status", get(get_status))
         .route("/api/v1/zrc20/status", get(get_zrc20_status))
         .route("/api/v1/zrc20/tokens", get(get_tokens_feed))
         .route("/api/v1/zrc20/token/:tick", get(get_token_info))
+        .route(
+            "/api/v1/zrc20/token/:tick/summary",
+            get(get_zrc20_token_summary),
+        )
         .route("/api/v1/zrc20/token/:tick/balances", get(get_zrc20_token_balances))
         .route("/api/v1/zrc20/address/:address", get(get_zrc20_address_balances))
+        .route(
+            "/api/v1/zrc20/token/:tick/rank/:address",
+            get(get_zrc20_rank),
+        )
         .route(
             "/api/v1/zrc20/token/:tick/integrity",
             get(get_zrc20_token_integrity),
@@ -444,6 +458,65 @@ async fn get_token_info(
     }
 }
 
+async fn get_zrc20_token_summary(
+    State(state): State<AppState>,
+    Path(tick): Path<String>,
+) -> Json<serde_json::Value> {
+    let lower = tick.to_lowercase();
+    let token_info = state.db.get_token_info(&lower).unwrap_or(None);
+    if let Some(raw) = token_info {
+        if let Ok(info) = serde_json::from_str::<serde_json::Value>(&raw) {
+            let dec = info["dec"].as_str().unwrap_or("18");
+            let supply_base = info["supply"].as_str().unwrap_or("0").to_string();
+            let max = info["max"].as_str().unwrap_or("0");
+            let lim = info["lim"].as_str().unwrap_or("");
+            let (sum_overall, _sum_avail, holders) =
+                state.db.sum_balances_for_tick(&lower).unwrap_or((0, 0, 0));
+            let transfers_completed = state
+                .db
+                .count_completed_transfers_for_tick(&lower)
+                .unwrap_or(0);
+            let consistent = parse_u128(&supply_base) == sum_overall;
+            return Json(serde_json::json!({
+                "tick": lower,
+                "dec": dec,
+                "supply_base_units": supply_base,
+                "holders": holders,
+                "transfers_completed": transfers_completed,
+                "max": max,
+                "lim": lim,
+                "integrity": { "consistent": consistent, "sum_holders_base_units": sum_overall.to_string() }
+            }));
+        }
+    }
+    Json(serde_json::json!({ "error": "Not found" }))
+}
+
+async fn get_zrc20_rank(
+    State(state): State<AppState>,
+    Path((tick, address)): Path<(String, String)>,
+) -> Json<serde_json::Value> {
+    let (rank, total) = state
+        .db
+        .rank_for_address_in_tick(&tick, &address)
+        .unwrap_or((0, 0));
+    let percentile = if total == 0 || rank == 0 {
+        0.0
+    } else {
+        // Higher balance = better (lower) rank; percentile as top share
+        let r = rank as f64;
+        let t = total as f64;
+        (1.0 - (r - 1.0) / t) * 100.0
+    };
+    Json(serde_json::json!({
+        "tick": tick,
+        "address": address,
+        "rank": rank,
+        "total_holders": total,
+        "percentile": percentile
+    }))
+}
+
 async fn get_balance(
     State(state): State<AppState>,
     Path((tick, address)): Path<(String, String)>,
@@ -523,10 +596,12 @@ async fn get_zrc20_transfer(
     if let Some(raw) = state.db.get_transfer_inscription(&id).unwrap_or(None) {
         let used = state.db.is_inscription_used(&id).unwrap_or(false);
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+        let outpoint = state.db.find_outpoint_by_transfer_id(&id).unwrap_or(None);
         return Json(serde_json::json!({
             "inscription_id": id,
             "transfer": parsed,
-            "used": used
+            "used": used,
+            "outpoint": outpoint
         }));
     }
     Json(serde_json::json!({ "error": "Transfer not found" }))
@@ -680,6 +755,20 @@ async fn names_page() -> Html<String> {
     }
 }
 
+async fn names_zec_page() -> Html<String> {
+    match std::fs::read_to_string("web/names_zec.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<p>names .zec page missing</p>".to_string()),
+    }
+}
+
+async fn names_zcash_page() -> Html<String> {
+    match std::fs::read_to_string("web/names_zcash.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<p>names .zcash page missing</p>".to_string()),
+    }
+}
+
 async fn collections_page() -> Html<String> {
     match std::fs::read_to_string("web/collections.html") {
         Ok(content) => Html(content),
@@ -758,6 +847,39 @@ async fn get_inscriptions_feed(
         has_more,
         items,
     }))
+}
+
+// Convenience filters for TLD-specific name feeds
+async fn get_names_feed_zec(
+    State(state): State<AppState>,
+    Query(mut params): Query<PaginationParams>,
+) -> Result<Json<PaginatedResponse<NameSummary>>, StatusCode> {
+    params.tld = Some("zec".to_string());
+    get_names_feed(State(state), Query(params)).await
+}
+
+async fn get_names_feed_zcash(
+    State(state): State<AppState>,
+    Query(mut params): Query<PaginationParams>,
+) -> Result<Json<PaginatedResponse<NameSummary>>, StatusCode> {
+    params.tld = Some("zcash".to_string());
+    get_names_feed(State(state), Query(params)).await
+}
+
+async fn get_names_by_address(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+) -> Json<serde_json::Value> {
+    let all = state.db.get_all_names().unwrap_or_default();
+    let mut names = Vec::new();
+    for (_name, data_str) in all {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&data_str) {
+            if val["owner"].as_str().map(|s| s == address).unwrap_or(false) {
+                names.push(val);
+            }
+        }
+    }
+    Json(serde_json::json!({ "address": address, "names": names }))
 }
 
 async fn get_tokens_feed(
@@ -842,54 +964,47 @@ async fn get_names_feed(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<NameSummary>>, StatusCode> {
     let (page, limit) = params.resolve();
-    
-    let (rows, total) = if let Some(query) = &params.q {
-        if query.trim().is_empty() {
-             let total = state.db.get_name_count().unwrap_or(0);
-             let rows = state.db.get_names_page(page, limit).unwrap_or_default();
-             (rows, total)
-        } else {
-            let rows = state.db.search_names(query, 100).unwrap_or_default();
-            let total = rows.len() as u64;
-            (rows, total)
+
+    // Pull all names and filter by optional tld and query for correctness
+    let names_all = match state.db.get_all_names() {
+        Ok(v) => v,
+        Err(err) => {
+            // During heavy reindexing, prefer a graceful empty result over a 500
+            tracing::warn!("names fetch error (returning empty set): {}", err);
+            Vec::new()
         }
-    } else {
-        let total = state.db.get_name_count().map_err(|err| {
-            tracing::error!("name count error: {}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        let rows = state.db.get_names_page(page, limit).map_err(|err| {
-            tracing::error!("name page error: {}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        (rows, total)
     };
 
-    let offset = (page as u64).saturating_mul(limit as u64);
-    let has_more = offset + (rows.len() as u64) < total;
-
-    let mut items = Vec::with_capacity(rows.len());
-    for (_key, payload) in rows {
+    let tld = params.tld.as_ref().map(|s| s.to_lowercase());
+    let q_lower = params.q.as_ref().map(|s| s.to_lowercase());
+    let mut filtered: Vec<NameSummary> = Vec::new();
+    for (_key, payload) in names_all {
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&payload) {
             let name = data["name"].as_str().unwrap_or("").to_string();
+            // tld filter
+            let keep_tld = match tld.as_deref() {
+                Some("zec") => name.ends_with(".zec"),
+                Some("zcash") => name.ends_with(".zcash"),
+                _ => true,
+            };
+            if !keep_tld { continue; }
+            // search filter
+            if let Some(q) = &q_lower {
+                if !name.to_lowercase().contains(q) { continue; }
+            }
             let owner = data["owner"].as_str().unwrap_or("unknown").to_string();
             let inscription_id = data["inscription_id"].as_str().unwrap_or("").to_string();
-
-            items.push(NameSummary {
-                name,
-                owner,
-                inscription_id,
-            });
+            filtered.push(NameSummary { name, owner, inscription_id });
         }
     }
+    // keep newest first by insertion order proxy
+    filtered.reverse();
+    let total = filtered.len() as u64;
+    let start = page.saturating_mul(limit);
+    let items: Vec<NameSummary> = filtered.into_iter().skip(start).take(limit).collect();
+    let has_more = (start as u64) + (items.len() as u64) < total;
 
-    Ok(Json(PaginatedResponse {
-        page,
-        limit,
-        total,
-        has_more,
-        items,
-    }))
+    Ok(Json(PaginatedResponse { page, limit, total, has_more, items }))
 }
 async fn get_inscription_preview(
     State(state): State<AppState>,

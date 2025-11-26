@@ -107,12 +107,24 @@ impl Indexer {
 
                         // Persist enough metadata for the HTTP layer to render without additional RPC calls
                         // Pick an assigned vout for the inscription: prefer the first output with an address
-                        let assigned_vout: u32 = tx
-                            .vout
-                            .iter()
-                            .find(|o| o.script_pub_key.addresses.as_ref().map(|a| !a.is_empty()).unwrap_or(false))
-                            .map(|o| o.n)
-                            .unwrap_or(0);
+                        // Prefer an output paying back to the sender; otherwise first address-bearing output
+                        let mut assigned_vout: Option<u32> = None;
+                        for o in &tx.vout {
+                            if let Some(addrs) = &o.script_pub_key.addresses {
+                                if addrs.iter().any(|a| a == &sender) {
+                                    assigned_vout = Some(o.n);
+                                    break;
+                                }
+                            }
+                        }
+                        if assigned_vout.is_none() {
+                            assigned_vout = tx
+                                .vout
+                                .iter()
+                                .find(|o| o.script_pub_key.addresses.as_ref().map(|a| !a.is_empty()).unwrap_or(false))
+                                .map(|o| o.n);
+                        }
+                        let assigned_vout = assigned_vout.unwrap_or(0);
 
                         let metadata = serde_json::json!({
                             "id": inscription_id,

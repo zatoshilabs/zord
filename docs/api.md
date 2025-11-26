@@ -1,89 +1,84 @@
-# Zord API Documentation
+# Zord HTTP API
 
-Zord provides a JSON API for querying inscriptions, ZRC-20 tokens, and ZNS names on Zcash.
+This document describes the public JSON API exposed by Zord for:
 
-## Base URL
-All API endpoints are prefixed with `/api/v1`.
+- Global status and blockchain snapshot
+- Inscriptions feed and previews
+- ZRC-20 (fungible) tokens: listings, balances, transfers
+- ZRC-721 (NFT) collections and tokens
+- ZNS (.zec /.zcash) name resolution
 
-## Endpoints
+Base path: `/api/v1` unless otherwise stated.
 
-### Status
-Get the current indexer status.
-- **GET** `/status`
-- **Response**:
-  ```json
-  {
-    "height": 3147101,
-    "inscriptions": 87078,
-    "tokens": 125,
-    "names": 602,
-    "synced": true,
-    "version": "0.1.0"
-  }
+Notes on amounts
+- Amounts returned by balance endpoints are base units (strings). Use `dec` to scale to human units: human = base / 10^dec.
+- Integrity endpoint returns base units for exact comparisons.
+
+## Global / Blockchain
+- GET `/api/v1/status` → `{ height, chain_tip, inscriptions, tokens, names, components:{core,zrc20,names}, version }`
+- GET `/block/height` → `{ height }` (latest indexed block height)
+
+## Inscriptions
+- GET `/api/v1/inscriptions?page=&limit=` → paginated feed with content types, sizes, sender labels, and previews.
+- Compat HTML/bytes:
+  - GET `/inscription/:id` (HTML detail)
+  - GET `/preview/:id` (framed preview)
+  - GET `/content/:id` (raw bytes)
+
+## ZRC-20 (fungible)
+- List tokens
+  - GET `/api/v1/tokens?page=&limit=&q=` → `{ items:[ { ticker, max, max_base_units, supply, supply_base_units, lim, dec, deployer, inscription_id, progress } ] }`
+- Token info
+  - GET `/api/v1/zrc20/token/:tick` → stored deploy record `{ tick, max, lim, dec, deployer, supply(base units), inscription_id }`
+  - GET `/api/v1/zrc20/token/:tick/summary` → `{ holders, transfers_completed, supply_base_units, lim, max, dec, integrity:{ consistent, sum_holders_base_units } }`
+- Holders for a ticker
+  - GET `/api/v1/zrc20/token/:tick/balances?page=&limit=` → `{ tick, page, limit, total_holders, holders:[ { address, available, overall } ] }`
+- Address portfolio
+  - GET `/api/v1/zrc20/address/:address` → `{ address, balances:[ { tick, available, overall } ] }`
+  - Rank/percentile within a ticker: GET `/api/v1/zrc20/token/:tick/rank/:address` → `{ rank, total_holders, percentile }`
+- Transfer inspection
+  - GET `/api/v1/zrc20/transfer/:id` → `{ inscription_id, transfer:{ tick, amt, sender }, used, outpoint? }`
+- Integrity
+  - GET `/api/v1/zrc20/token/:tick/integrity` → `{ supply_base_units, sum_overall_base_units, sum_available_base_units, total_holders, consistent }`
+- Status
+  - GET `/api/v1/zrc20/status` → `{ height, chain_tip, tokens, version }`
+- Compatibility
+  - GET `/token/:tick` (same as token info, legacy)
+  - GET `/token/:tick/balance/:address`
+
+## ZRC-721 (NFT)
+- Collections
+  - GET `/api/v1/zrc721/collections?page=&limit=` → `{ collections:[ { collection, supply, minted, meta, royalty, deployer, inscription_id } ] }`
+  - GET `/api/v1/zrc721/collection/:collection` → deploy record
+- Tokens
+  - GET `/api/v1/zrc721/collection/:collection/tokens?page=&limit=` → `{ tokens:[ { collection, token_id, owner, inscription_id, metadata } ] }`
+  - GET `/api/v1/zrc721/address/:address` → `{ tokens:[ ... ] }`
+- Status
+  - GET `/api/v1/zrc721/status` → `{ collections, tokens, height, chain_tip, version }`
+- Deploy/mint payloads (indexer rules)
+  - Deploy: `{ "p":"zrc-721","op":"deploy","collection":"ZGODS","supply":"10000","meta":"<cid or object>","royalty":"100" }`
+  - Mint: `{ "p":"zrc-721","op":"mint","collection":"ZGODS","id":"0" }`
+  - Rules: first‑is‑first; ids are numeric and 0 ≤ id < supply.
+
+## Names (ZNS)
+- List (all): GET `/api/v1/names?page=&limit=&q=&tld=zec|zcash`
+- List (.zec): GET `/api/v1/names/zec?page=&limit=&q=`
+- List (.zcash): GET `/api/v1/names/zcash?page=&limit=&q=`
+- Names by owner: GET `/api/v1/names/address/:address`
+- Resolve: GET `/api/v1/resolve/:name` → `{ name, address }` or `{ error }`
+  - Also available at `/resolve/:name` (browser convenience)
+
+## Examples
+- ZERO holders sum:
+  ```sh
+  curl -s '/api/v1/zrc20/token/zero/balances?page=0&limit=20000' \
+    | jq -r '[.holders[].overall|tonumber]|add'
   ```
-
-### Inscriptions
-Get a paginated list of recent inscriptions.
-- **GET** `/inscriptions`
-- **Parameters**:
-  - `page` (optional, default 0): Page number.
-  - `limit` (optional, default 24): Items per page.
-- **Response**:
-  ```json
-  {
-    "page": 0,
-    "limit": 24,
-    "total": 87078,
-    "has_more": true,
-    "items": [ ... ]
-  }
+- Integrity:
+  ```sh
+  curl -s '/api/v1/zrc20/token/zero/integrity' | jq
   ```
-
-### Tokens (ZRC-20)
-Get a list of deployed tokens.
-- **GET** `/tokens`
-- **Parameters**:
-  - `page` (optional, default 0)
-  - `limit` (optional, default 100)
-  - `q` (optional): Search query (prefix match on ticker).
-- **Response**:
-  ```json
-  {
-    "items": [
-      {
-        "ticker": "zero",
-        "max": "21000000",
-        "supply": "0",
-        "deployer": "...",
-        "progress": 0.0
-      }
-    ]
-  }
+- Address balances:
+  ```sh
+  curl -s '/api/v1/zrc20/address/t1...' | jq
   ```
-
-### Names (ZNS)
-Get a list of registered names.
-- **GET** `/names`
-- **Parameters**:
-  - `page` (optional, default 0)
-  - `limit` (optional, default 100)
-  - `q` (optional): Search query (prefix match on name).
-- **Response**:
-  ```json
-  {
-    "items": [
-      {
-        "name": "satoshi.zec",
-        "owner": "...",
-        "inscription_id": "..."
-      }
-    ]
-  }
-  ```
-
-## Legacy / Ord-Compatible Endpoints
-For compatibility with existing tooling:
-- `/inscription/:id` - Get inscription metadata/HTML.
-- `/content/:id` - Get raw inscription content.
-- `/token/:tick` - Get specific token info.
-- `/token/:tick/balance/:address` - Get token balance.

@@ -348,12 +348,27 @@ class NameTable extends PaginatedComponent {
     }
 
     get endpoint() {
+        const tld = this.getAttribute('tld');
+        if (tld === 'zec') return '/api/v1/names/zec';
+        if (tld === 'zcash') return '/api/v1/names/zcash';
         return '/api/v1/names';
     }
 
     render(items) {
         if (!items.length) {
-            this.setPlaceholder('No names registered', 'empty');
+            // Try to show syncing context instead of a blank/empty state during reindexing
+            fetch('/api/v1/status')
+                .then((r) => (r.ok ? r.json() : null))
+                .then((status) => {
+                    if (!status) {
+                        this.setPlaceholder('No names available', 'empty');
+                        return;
+                    }
+                    const h = status.components?.names?.height ?? status.height ?? '—';
+                    const tip = status.chain_tip ?? '—';
+                    this.setPlaceholder(`Syncing names… as of height ${h} (tip: ${tip})`, 'loading');
+                })
+                .catch(() => this.setPlaceholder('No names available', 'empty'));
             return;
         }
 

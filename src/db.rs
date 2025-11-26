@@ -418,6 +418,60 @@ impl Db {
         Ok((sum_overall, sum_available, count))
     }
 
+    /// Count completed (settled) transfer inscriptions for a given ticker.
+    pub fn count_completed_transfers_for_tick(&self, tick: &str) -> Result<u64> {
+        let needle = tick.to_lowercase();
+        let read_txn = self.db.begin_read()?;
+        let transfers = read_txn.open_table(TRANSFER_INSCRIPTIONS)?;
+        let state = read_txn.open_table(INSCRIPTION_STATE)?;
+        let mut count: u64 = 0;
+        for item in transfers.iter()? {
+            let (k, v) = item?;
+            // parse transfer payload and match ticker
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(v.value()) {
+                if val["tick"].as_str().map(|s| s == needle).unwrap_or(false) {
+                    let id = k.value();
+                    if let Some(st) = state.get(id)? {
+                        if st.value() == "used" {
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(count)
+    }
+
+    /// Compute rank (1-based) and total holders for a ticker by overall balance.
+    /// Returns (rank, total_holders). If address not found or has zero, rank is null (0).
+    pub fn rank_for_address_in_tick(&self, tick: &str, address: &str) -> Result<(u64, u64)> {
+        let needle = tick.to_lowercase();
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(BALANCES)?;
+        let mut rows: Vec<(String, u128)> = Vec::new();
+        for item in table.iter()? {
+            let (k, v) = item?;
+            if let Some((addr, token)) = k.value().split_once(':') {
+                if token == needle {
+                    let bal = serde_json::from_str::<Balance>(v.value())?;
+                    if bal.overall > 0 {
+                        rows.push((addr.to_string(), bal.overall));
+                    }
+                }
+            }
+        }
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+        let total = rows.len() as u64;
+        let mut rank: u64 = 0;
+        for (idx, (addr, _)) in rows.iter().enumerate() {
+            if addr == address {
+                rank = (idx as u64) + 1;
+                break;
+            }
+        }
+        Ok((rank, total))
+    }
+
     pub fn list_balances_for_address(&self, address: &str) -> Result<Vec<(String, Balance)>> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(BALANCES)?;
@@ -637,6 +691,19 @@ impl Db {
         }
         write_txn.commit()?;
         Ok(())
+    }
+
+    /// Reverse lookup helper for debugging/APIs: find outpoint for a transfer inscription id.
+    pub fn find_outpoint_by_transfer_id(&self, inscription_id: &str) -> Result<Option<String>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(TRANSFER_OUTPOINTS)?;
+        for item in table.iter()? {
+            let (k, v) = item?;
+            if v.value() == inscription_id {
+                return Ok(Some(k.value().to_string()));
+            }
+        }
+        Ok(None)
     }
 
     pub fn get_transfer_inscription(&self, inscription_id: &str) -> Result<Option<String>> {

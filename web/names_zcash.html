@@ -3,20 +3,21 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Zord · ZRC-20</title>
+    <title>Zord · .zcash Names</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
-</head>
+    <style>.subtabs a{ margin-right:10px; }</style>
+    </head>
 <body>
     <header class="bar">
         <nav>
             <a href="/">inscriptions</a>
-            <a href="/tokens" class="active">zrc-20</a>
+            <a href="/tokens">zrc-20</a>
             <a href="/collections">zrc-721</a>
             <a href="/names/zec">names.zec</a>
-            <a href="/names/zcash">names.zcash</a>
+            <a href="/names/zcash" class="active">names.zcash</a>
             <a href="/docs">docs</a>
             <a href="/spec">api</a>
         </nav>
@@ -25,19 +26,17 @@
 
     <main>
         <section class="search">
-            <input type="text" id="token-search" placeholder="filter tickers" autocomplete="off">
+            <input type="text" id="name-search" placeholder="filter .zcash names" autocomplete="off">
         </section>
-        <div class="token-wrap">
-            <token-table page-size="120" id="token-list"></token-table>
-        </div>
+        <name-table page-size="120" id="name-list" tld="zcash"></name-table>
     </main>
 
     <sync-footer></sync-footer>
 
     <script type="module" src="/static/app.js"></script>
     <script>
-        const input = document.getElementById('token-search');
-        const table = document.getElementById('token-list');
+        const input = document.getElementById('name-search');
+        const table = document.getElementById('name-list');
         let timer;
         input.addEventListener('input', (event) => {
             clearTimeout(timer);
@@ -48,3 +47,4 @@
     </script>
 </body>
 </html>
+

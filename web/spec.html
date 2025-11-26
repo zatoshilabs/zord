@@ -23,34 +23,44 @@
 
     <main class="notes">
         <section>
-            <h1>HTTP</h1>
+            <h1>Global / Blockchain</h1>
             <ul>
-                <li><code>GET /api/v1/inscriptions?page=n&limit=m</code></li>
-                <li><code>GET /api/v1/tokens?page=n&limit=m&q=tick</code></li>
-                <li><code>GET /api/v1/names?page=n&limit=m&q=name</code></li>
-                <li><code>GET /api/v1/status</code></li>
-                <li><code>GET /inscription/:id</code> (HTML)</li>
-                <li><code>GET /content/:id</code> (raw)</li>
-                <li><code>GET /preview/:id</code></li>
-                <li><code>GET /api/v1/zrc20/status</code></li>
-                <li><code>GET /api/v1/zrc20/token/:tick/balances</code></li>
-                <li><code>GET /api/v1/zrc20/address/:address</code></li>
-                <li><code>GET /api/v1/zrc20/transfer/:id</code></li>
+                <li><code>GET /api/v1/status</code> – index height, chain tip, components</li>
+                <li><code>GET /block/height</code> – latest indexed height</li>
+                <li><code>GET /api/v1/inscriptions?page=&limit=</code> – recent inscriptions</li>
+                <li><code>GET /inscription/:id</code> (HTML), <code>/preview/:id</code>, <code>/content/:id</code></li>
             </ul>
         </section>
         <section>
-            <h2>Marketplace workflow</h2>
-            <p>To list a ZRC-20 token for sale a wallet:</p>
-            <ol>
-                <li>Mints tokens using a standard inscription (<code>{"p":"zrc-20","op":"mint", ...}</code>).</li>
-                <li>Creates a transfer inscription that locks the amount.</li>
-                <li>Builds a PSBT using the locked inscription and publishes it once the deal is matched.</li>
-            </ol>
-            <p>Marketplaces verify balances and locks by calling:</p>
+            <h2>ZRC‑20</h2>
             <ul>
-                <li><code>/api/v1/zrc20/token/:tick/balances</code> to inspect holders.</li>
-                <li><code>/api/v1/zrc20/address/:address</code> to show a seller’s portfolio.</li>
-                <li><code>/api/v1/zrc20/transfer/:id</code> to check the locked amount and whether the inscription has been consumed.</li>
+                <li><code>GET /api/v1/tokens?page=&limit=&q=</code> – token list</li>
+                <li><code>GET /api/v1/zrc20/token/:tick</code> – token info (base units)</li>
+                <li><code>GET /api/v1/zrc20/token/:tick/balances?page=&limit=</code> – holders</li>
+                <li><code>GET /api/v1/zrc20/address/:address</code> – address portfolio</li>
+                <li><code>GET /api/v1/zrc20/transfer/:id</code> – staged transfer (with <code>used</code> and <code>outpoint</code>)</li>
+                <li><code>GET /api/v1/zrc20/token/:tick/integrity</code> – supply vs holders sum</li>
+                <li><code>GET /api/v1/zrc20/status</code> – module height</li>
+                <li>Compat: <code>/token/:tick</code>, <code>/token/:tick/balance/:address</code></li>
+            </ul>
+        </section>
+        <section>
+            <h2>ZRC‑721</h2>
+            <ul>
+                <li><code>GET /api/v1/zrc721/collections?page=&limit=</code></li>
+                <li><code>GET /api/v1/zrc721/collection/:collection</code></li>
+                <li><code>GET /api/v1/zrc721/collection/:collection/tokens?page=&limit=</code></li>
+                <li><code>GET /api/v1/zrc721/address/:address</code></li>
+                <li><code>GET /api/v1/zrc721/status</code></li>
+            </ul>
+            <p>Deploy: <code>{"p":"zrc-721","op":"deploy","collection":"...","supply":"...","meta":"...","royalty":"..."}</code></p>
+            <p>Mint: <code>{"p":"zrc-721","op":"mint","collection":"...","id":"0"}</code> (first‑is‑first; 0 ≤ id &lt; supply)</p>
+        </section>
+        <section>
+            <h2>Names (ZNS)</h2>
+            <ul>
+                <li><code>GET /api/v1/names?page=&limit=&q=</code></li>
+                <li><code>GET /api/v1/resolve/:name</code> – JSON resolver (.zec / .zcash)</li>
             </ul>
         </section>
     </main>

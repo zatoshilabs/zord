@@ -31,6 +31,7 @@ struct PaginationParams {
     limit: Option<usize>,
     q: Option<String>,
     tld: Option<String>,
+    positive_only: Option<bool>,
 }
 
 impl PaginationParams {
@@ -656,10 +657,11 @@ async fn get_zrc20_token_balances(
     Query(params): Query<PaginationParams>,
 ) -> Json<serde_json::Value> {
     let (page, limit) = params.resolve();
-    let (rows, total) = state
+    let positive_only = params.positive_only.unwrap_or(false);
+    let (rows, total_all, total_positive) = state
         .db
-        .list_balances_for_tick(&tick, page, limit)
-        .unwrap_or_default();
+        .list_balances_for_tick_filtered(&tick, page, limit, positive_only)
+        .unwrap_or((Vec::new(), 0, 0));
     let holders: Vec<serde_json::Value> = rows
         .into_iter()
         .map(|(address, bal)| {
@@ -674,7 +676,9 @@ async fn get_zrc20_token_balances(
         "tick": tick,
         "page": page,
         "limit": limit,
-        "total_holders": total,
+        "positive_only": positive_only,
+        "total_holders": total_all,
+        "total_positive_holders": total_positive,
         "holders": holders
     }))
 }

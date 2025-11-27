@@ -35,7 +35,7 @@ Notes on amounts
   - GET `/api/v1/zrc20/token/:tick` → stored deploy record `{ tick, max, lim, dec, deployer, supply(base units), inscription_id }`
   - GET `/api/v1/zrc20/token/:tick/summary` → `{ holders, holders_total, transfers_completed, supply_base_units, lim, max, dec, integrity:{ consistent, sum_holders_base_units, burned_base_units } }`
 - Holders for a ticker
-  - GET `/api/v1/zrc20/token/:tick/balances?page=&limit=` → `{ tick, page, limit, total_holders, holders:[ { address, available, overall } ] }`
+  - GET `/api/v1/zrc20/token/:tick/balances?page=&limit=&positive_only=` → `{ tick, page, limit, positive_only, total_holders, total_positive_holders, holders:[ { address, available, overall } ] }`
 - Address portfolio
   - GET `/api/v1/zrc20/address/:address` → `{ address, balances:[ { tick, available, overall } ] }`
   - Rank/percentile within a ticker: GET `/api/v1/zrc20/token/:tick/rank/:address` → `{ rank, total_holders, percentile }`

@@ -403,6 +403,41 @@ impl Db {
         Ok((page_rows, total))
     }
 
+    /// List balances for a ticker with optional positive-only filter.
+    /// Returns (rows(page-limited), total_all_rows, total_positive_rows).
+    pub fn list_balances_for_tick_filtered(
+        &self,
+        tick: &str,
+        page: usize,
+        limit: usize,
+        positive_only: bool,
+    ) -> Result<(Vec<(String, Balance)>, usize, usize)> {
+        let needle = tick.to_lowercase();
+        let offset = page.saturating_mul(limit);
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(BALANCES)?;
+        let mut rows: Vec<(String, Balance)> = Vec::new();
+        let mut total_all: usize = 0;
+        let mut total_positive: usize = 0;
+        for item in table.iter()? {
+            let (k, v) = item?;
+            let key = k.value();
+            if let Some((address, token)) = key.split_once(':') {
+                if token == needle {
+                    let bal = serde_json::from_str::<Balance>(v.value())?;
+                    total_all += 1;
+                    if bal.overall > 0 { total_positive += 1; }
+                    if !positive_only || bal.overall > 0 {
+                        rows.push((address.to_string(), bal));
+                    }
+                }
+            }
+        }
+        rows.sort_by(|a, b| b.1.overall.cmp(&a.1.overall));
+        let page_rows = rows.into_iter().skip(offset).take(limit).collect();
+        Ok((page_rows, total_all, total_positive))
+    }
+
     /// Sum balances for a given ticker across all addresses.
     /// Returns (sum_overall, sum_available, total_rows, holders_positive).
     pub fn sum_balances_for_tick(&self, tick: &str) -> Result<(u128, u128, usize, usize)> {

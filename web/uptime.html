@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zord · Uptime</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header class="bar">
+        <nav>
+            <a href="/">inscriptions</a>
+            <a href="/tokens">zrc-20</a>
+            <a href="/collections">zrc-721</a>
+            <a href="/names">names</a>
+            <a href="/docs">docs</a>
+            <a href="/spec">api</a>
+            <a href="/uptime" class="active">uptime</a>
+        </nav>
+        <zord-status></zord-status>
+    </header>
+
+    <main>
+        <section class="controls">
+            <div class="chip-row">
+                <span class="chip active">live metrics</span>
+            </div>
+        </section>
+
+        <section id="uptime-cards" class="grid"></section>
+
+        <section class="controls">
+            <div class="chip-row">
+                <span class="chip">sync status</span>
+            </div>
+        </section>
+        <section id="sync-cards" class="grid"></section>
+    </main>
+
+    <sync-footer></sync-footer>
+    <script type="module" src="/static/app.js"></script>
+    <script>
+    const nf = new Intl.NumberFormat('en-US');
+    const dur = (secs) => {
+        secs = Math.max(0, Number(secs||0));
+        const d = Math.floor(secs / 86400);
+        const h = Math.floor((secs % 86400) / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const s = Math.floor(secs % 60);
+        const parts = [];
+        if (d) parts.push(d + 'd');
+        if (d || h) parts.push(h + 'h');
+        if (d || h || m) parts.push(m + 'm');
+        parts.push(s + 's');
+        return parts.join(' ');
+    };
+
+    function card(title, val, subtitle) {
+        const art = document.createElement('article');
+        art.className = 'card';
+        const h = document.createElement('header');
+        const t = document.createElement('span'); t.textContent = title.toUpperCase(); h.appendChild(t);
+        art.appendChild(h);
+        const code = document.createElement('code');
+        code.textContent = val;
+        art.appendChild(code);
+        if (subtitle) {
+            const foot = document.createElement('footer');
+            const sub = document.createElement('span'); sub.textContent = subtitle; foot.appendChild(sub);
+            art.appendChild(foot);
+        }
+        return art;
+    }
+
+    function gaugeCard(title, used, cap, unit, hint) {
+        used = Number(used||0); cap = Math.max(1, Number(cap||1));
+        const pct = Math.min(100, Math.max(0, (used / cap) * 100));
+        const art = document.createElement('article');
+        art.className = 'card';
+        const h = document.createElement('header');
+        const t = document.createElement('span'); t.textContent = title.toUpperCase(); h.appendChild(t);
+        art.appendChild(h);
+        const wrap = document.createElement('div');
+        const bar = document.createElement('div'); bar.className = 'progress';
+        const fill = document.createElement('span'); fill.style.width = pct.toFixed(2) + '%'; bar.appendChild(fill);
+        wrap.appendChild(bar);
+        const meta = document.createElement('code');
+        meta.textContent = `${nf.format(used)} / ${nf.format(cap)} ${unit} (${pct.toFixed(1)}%)`;
+        wrap.appendChild(meta);
+        art.appendChild(wrap);
+        if (hint) { const f = document.createElement('footer'); const s = document.createElement('span'); s.textContent = hint; f.appendChild(s); art.appendChild(f); }
+        return art;
+    }
+
+    let last = null;
+    let lastAt = 0;
+    async function refresh() {
+        try {
+            const [mRes, sRes] = await Promise.all([
+                fetch('/api/v1/metrics'),
+                fetch('/api/v1/status')
+            ]);
+            if (!mRes.ok) throw new Error('metrics');
+            const metrics = await mRes.json();
+            const status = sRes.ok ? await sRes.json() : {};
+
+            const now = Date.now() / 1000;
+            const cards = document.getElementById('uptime-cards');
+            cards.innerHTML = '';
+
+            // Uptime
+            cards.appendChild(card('uptime', dur(metrics.uptime_seconds || 0), new Date((metrics.start_time_unix||0)*1000).toISOString().replace('T',' ').replace('Z',' UTC')));
+
+            // Inflight gauge
+            cards.appendChild(gaugeCard('inflight', metrics.inflight||0, metrics.max_inflight||0, 'req', 'live HTTP requests'));
+
+            // Open FDs gauge
+            const soft = Number(metrics?.limits?.nofile?.soft) || 0;
+            cards.appendChild(gaugeCard('open files', metrics.open_fds||0, soft||1, 'fds', 'process file descriptors'));
+
+            // Throughput (req/s) and 5xx/s
+            if (last && lastAt) {
+                const dt = Math.max(0.5, now - lastAt);
+                const dr = (metrics.requests_total||0) - (last.requests_total||0);
+                const d5 = (metrics.responses_5xx_total||0) - (last.responses_5xx_total||0);
+                cards.appendChild(card('throughput', `${(dr/dt).toFixed(2)} req/s`, `${nf.format(dr)} in ${dt.toFixed(1)}s`));
+                cards.appendChild(card('errors', `${(d5/dt).toFixed(2)} 5xx/s`, `${nf.format(d5)} in ${dt.toFixed(1)}s`));
+            } else {
+                cards.appendChild(card('throughput', '—', 'collecting…'));
+                cards.appendChild(card('errors', '—', 'collecting…'));
+            }
+
+            last = metrics; lastAt = now;
+
+            // Sync status cards
+            const sync = document.getElementById('sync-cards');
+            sync.innerHTML = '';
+            const comps = status.components || {};
+            const entries = [ ['core', comps.core||{}], ['zrc20', comps.zrc20||{}], ['names', comps.names||{}], ['zrc721', comps.zrc721||{}] ];
+            entries.forEach(([label, info]) => {
+                const used = Number(info.height||0), cap = Number(info.tip||0);
+                const hint = `height ${nf.format(used)} / tip ${nf.format(cap)}`;
+                sync.appendChild(gaugeCard(label + ' sync', used, cap||1, 'blocks', hint));
+            });
+        } catch (e) {
+            // noop
+        }
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+    </script>
+</body>
+</html>
+

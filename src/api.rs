@@ -17,7 +17,8 @@ use tower::timeout::TimeoutLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::compression::CompressionLayer;
 use axum::error_handling::HandleErrorLayer;
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::{Arc, atomic::{AtomicUsize, AtomicU64, Ordering}};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::fs;
 use axum::body::Body;
 use tower_http::services::ServeDir;
@@ -48,9 +49,12 @@ pub struct AppState {
     metrics: Arc<ServerMetrics>,
 }
 
-#[derive(Default)]
 pub struct ServerMetrics {
     inflight: AtomicUsize,
+    requests_total: AtomicU64,
+    responses_5xx_total: AtomicU64,
+    start_unix: u64,
+    max_inflight: usize,
 }
 
 #[derive(Serialize)]
@@ -119,9 +123,6 @@ struct NameSummary {
 }
 
 pub async fn start_api(db: Db, port: u16) {
-    let metrics = Arc::new(ServerMetrics { inflight: AtomicUsize::new(0) });
-    let state = AppState { db, metrics: metrics.clone() };
-
     // Runtime tunables: concurrency & request timeout
     let max_inflight: usize = std::env::var("API_MAX_INFLIGHT")
         .ok()
@@ -131,6 +132,16 @@ pub async fn start_api(db: Db, port: u16) {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(15);
+
+    let start_unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let metrics = Arc::new(ServerMetrics {
+        inflight: AtomicUsize::new(0),
+        requests_total: AtomicU64::new(0),
+        responses_5xx_total: AtomicU64::new(0),
+        start_unix,
+        max_inflight,
+    });
+    let state = AppState { db, metrics: metrics.clone() };
 
     let middleware = ServiceBuilder::new()
         // Convert middleware errors (e.g., timeouts) into HTTP responses
@@ -165,6 +176,7 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/collection/:tick", get(collection_detail_page))
         .route("/docs", get(docs_page))
         .route("/spec", get(spec_page))
+        .route("/uptime", get(uptime_page))
         .route("/api", get(api_docs))
         .route("/api/v1/metrics", get(get_metrics))
         // JSON feeds powering the frontend widgets
@@ -251,7 +263,11 @@ pub async fn start_api(db: Db, port: u16) {
 
 async fn track_inflight(State(state): State<AppState>, req: axum::http::Request<Body>, next: Next) -> impl IntoResponse {
     state.metrics.inflight.fetch_add(1, Ordering::Relaxed);
+    state.metrics.requests_total.fetch_add(1, Ordering::Relaxed);
     let res = next.run(req).await;
+    if res.status().as_u16() >= 500 {
+        state.metrics.responses_5xx_total.fetch_add(1, Ordering::Relaxed);
+    }
     state.metrics.inflight.fetch_sub(1, Ordering::Relaxed);
     res
 }
@@ -260,10 +276,19 @@ async fn get_metrics(State(state): State<AppState>) -> Json<serde_json::Value> {
     let inflight = state.metrics.inflight.load(Ordering::Relaxed) as u64;
     let open_fds = count_open_fds();
     let (soft, hard) = get_fd_limits();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let uptime_seconds = now.saturating_sub(state.metrics.start_unix);
+    let requests_total = state.metrics.requests_total.load(Ordering::Relaxed);
+    let responses_5xx_total = state.metrics.responses_5xx_total.load(Ordering::Relaxed);
     Json(serde_json::json!({
         "inflight": inflight,
+        "max_inflight": state.metrics.max_inflight,
         "open_fds": open_fds,
-        "limits": { "nofile": { "soft": soft, "hard": hard } }
+        "limits": { "nofile": { "soft": soft, "hard": hard } },
+        "start_time_unix": state.metrics.start_unix,
+        "uptime_seconds": uptime_seconds,
+        "requests_total": requests_total,
+        "responses_5xx_total": responses_5xx_total
     }))
 }
 
@@ -1003,6 +1028,13 @@ async fn spec_page() -> Html<String> {
     match std::fs::read_to_string("web/spec.html") {
         Ok(content) => Html(content),
         Err(_) => Html("<p>spec page missing</p>".to_string()),
+    }
+}
+
+async fn uptime_page() -> Html<String> {
+    match std::fs::read_to_string("web/uptime.html") {
+        Ok(content) => Html(content),
+        Err(_) => Html("<p>uptime page missing</p>".to_string()),
     }
 }
 

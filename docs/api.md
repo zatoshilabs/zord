@@ -13,6 +13,7 @@ Base path: `/api/v1` unless otherwise stated.
 Notes on amounts
 - Amounts returned by balance endpoints are base units (strings). Use `dec` to scale to human units: human = base / 10^dec.
 - Integrity endpoint returns base units for exact comparisons.
+- Holder counts: `holders` and `holders_positive` include only addresses with a positive overall balance; `holders_total` counts all balance rows (including zero), for transparency.
 
 ## Global / Blockchain
 - GET `/api/v1/status` → `{ height, chain_tip, inscriptions, tokens, names, components:{core,zrc20,names}, version }`
@@ -32,7 +33,7 @@ Notes on amounts
   - GET `/api/v1/tokens?page=&limit=&q=` → `{ items:[ { ticker, max, max_base_units, supply, supply_base_units, lim, dec, deployer, inscription_id, progress } ] }`
 - Token info
   - GET `/api/v1/zrc20/token/:tick` → stored deploy record `{ tick, max, lim, dec, deployer, supply(base units), inscription_id }`
-  - GET `/api/v1/zrc20/token/:tick/summary` → `{ holders, transfers_completed, supply_base_units, lim, max, dec, integrity:{ consistent, sum_holders_base_units, burned_base_units } }`
+  - GET `/api/v1/zrc20/token/:tick/summary` → `{ holders, holders_total, transfers_completed, supply_base_units, lim, max, dec, integrity:{ consistent, sum_holders_base_units, burned_base_units } }`
 - Holders for a ticker
   - GET `/api/v1/zrc20/token/:tick/balances?page=&limit=` → `{ tick, page, limit, total_holders, holders:[ { address, available, overall } ] }`
 - Address portfolio
@@ -41,7 +42,7 @@ Notes on amounts
 - Transfer inspection
   - GET `/api/v1/zrc20/transfer/:id` → `{ inscription_id, transfer:{ tick, amt, sender }, used, outpoint? }`
 - Integrity
-  - GET `/api/v1/zrc20/token/:tick/integrity` → `{ supply_base_units, sum_overall_base_units, sum_available_base_units, burned_base_units, total_holders, consistent }`
+  - GET `/api/v1/zrc20/token/:tick/integrity` → `{ supply_base_units, sum_overall_base_units, sum_available_base_units, burned_base_units, total_holders, holders_positive, consistent }`
 - Status
   - GET `/api/v1/zrc20/status` → `{ height, chain_tip, tokens, version }`
   - GET `/api/v1/zrc20/token/:tick/burned` → `{ burned_base_units }`

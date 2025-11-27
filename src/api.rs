@@ -482,8 +482,8 @@ async fn get_zrc20_token_summary(
             let supply_base = info["supply"].as_str().unwrap_or("0").to_string();
             let max = info["max"].as_str().unwrap_or("0");
             let lim = info["lim"].as_str().unwrap_or("");
-            let (sum_overall, _sum_avail, holders) =
-                state.db.sum_balances_for_tick(&lower).unwrap_or((0, 0, 0));
+            let (sum_overall, _sum_avail, holders_total, holders_positive) =
+                state.db.sum_balances_for_tick(&lower).unwrap_or((0, 0, 0, 0));
             let transfers_completed = state
                 .db
                 .count_completed_transfers_for_tick(&lower)
@@ -494,7 +494,9 @@ async fn get_zrc20_token_summary(
                 "tick": lower,
                 "dec": dec,
                 "supply_base_units": supply_base,
-                "holders": holders,
+                // Report holders as positive-balance addresses; also include total rows for transparency
+                "holders": holders_positive,
+                "holders_total": holders_total,
                 "transfers_completed": transfers_completed,
                 "max": max,
                 "lim": lim,
@@ -633,8 +635,8 @@ async fn get_zrc20_token_integrity(
                 .unwrap_or("0")
                 .to_string();
             let dec = info["dec"].as_str().unwrap_or("18");
-            let (sum_overall, sum_available, holders) =
-                state.db.sum_balances_for_tick(&lower).unwrap_or((0, 0, 0));
+            let (sum_overall, sum_available, holders_total, holders_positive) =
+                state.db.sum_balances_for_tick(&lower).unwrap_or((0, 0, 0, 0));
             let burned = state.db.get_burned(&lower).unwrap_or(0);
             let supply = parse_u128(&supply_base);
             let consistent = supply == sum_overall + burned;
@@ -644,7 +646,8 @@ async fn get_zrc20_token_integrity(
                 "supply_base_units": supply_base,
                 "sum_overall_base_units": sum_overall.to_string(),
                 "sum_available_base_units": sum_available.to_string(),
-                "total_holders": holders,
+                "total_holders": holders_total,
+                "holders_positive": holders_positive,
                 "burned_base_units": burned.to_string(),
                 "consistent": consistent
             }));

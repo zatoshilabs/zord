@@ -365,7 +365,12 @@ impl Db {
                 overall: next_overall as u128,
             };
 
-            table.insert(key.as_str(), serde_json::to_string(&new_balance)?.as_str())?;
+            // Prune storage for true zero rows to keep holder counts tidy
+            if new_balance.available == 0 && new_balance.overall == 0 {
+                let _ = table.remove(key.as_str());
+            } else {
+                table.insert(key.as_str(), serde_json::to_string(&new_balance)?.as_str())?;
+            }
         }
         write_txn.commit()?;
         Ok(())
@@ -399,14 +404,15 @@ impl Db {
     }
 
     /// Sum balances for a given ticker across all addresses.
-    /// Returns (sum_overall, sum_available, holder_count).
-    pub fn sum_balances_for_tick(&self, tick: &str) -> Result<(u128, u128, usize)> {
+    /// Returns (sum_overall, sum_available, total_rows, holders_positive).
+    pub fn sum_balances_for_tick(&self, tick: &str) -> Result<(u128, u128, usize, usize)> {
         let needle = tick.to_lowercase();
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(BALANCES)?;
         let mut sum_overall: u128 = 0;
         let mut sum_available: u128 = 0;
-        let mut count: usize = 0;
+        let mut total_rows: usize = 0;
+        let mut holders_positive: usize = 0;
         for item in table.iter()? {
             let (k, v) = item?;
             let key = k.value();
@@ -419,11 +425,14 @@ impl Db {
                     sum_available = sum_available
                         .checked_add(bal.available)
                         .ok_or_else(|| anyhow::anyhow!("available sum overflow"))?;
-                    count += 1;
+                    total_rows += 1;
+                    if bal.overall > 0 {
+                        holders_positive += 1;
+                    }
                 }
             }
         }
-        Ok((sum_overall, sum_available, count))
+        Ok((sum_overall, sum_available, total_rows, holders_positive))
     }
 
     pub fn add_burned(&self, tick: &str, amt: u128) -> Result<()> {

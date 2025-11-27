@@ -432,7 +432,13 @@ class NameTable extends PaginatedComponent {
             return dir === 'asc' ? cmp : -cmp;
         });
         if (!sorted.length) {
-            // Try to show syncing context instead of a blank/empty state during reindexing
+            // If user has active filters, show a filter-specific empty state
+            const hasFilter = (this.query && this.query.trim().length > 0) || (this.getAttribute && this.getAttribute('tld'));
+            if (hasFilter) {
+                this.setPlaceholder('No names match your filter', 'empty');
+                return;
+            }
+            // Otherwise, show syncing context during/after indexing
             fetch('/api/v1/status')
                 .then((r) => (r.ok ? r.json() : null))
                 .then((status) => {

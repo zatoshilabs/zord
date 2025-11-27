@@ -239,7 +239,7 @@ pub async fn start_api(db: Db, port: u16) {
         .nest_service("/static", ServeDir::new("web"))
         .layer(middleware)
         // Track in-flight requests for metrics
-        .layer(middleware::from_fn(track_inflight))
+        .layer(middleware::from_fn_with_state(state.clone(), track_inflight))
         .with_state(state);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
@@ -599,7 +599,11 @@ async fn get_zrc20_token_summary(
             return (headers, Json(body));
         }
     }
-    Json(serde_json::json!({ "error": "Not found" }))
+    {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=10"));
+        (headers, Json(serde_json::json!({ "error": "Not found" })))
+    }
 }
 
 async fn get_zrc20_rank(
@@ -751,7 +755,11 @@ async fn get_zrc20_token_integrity(
             return (headers, Json(body));
         }
     }
-    Json(serde_json::json!({ "error": "Token not found" }))
+    {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=10"));
+        (headers, Json(serde_json::json!({ "error": "Token not found" })))
+    }
 }
 
 async fn get_zrc721_collections(

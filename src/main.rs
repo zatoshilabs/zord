@@ -14,13 +14,19 @@ use tracing_subscriber::FmtSubscriber;
 #[tokio::main]
 async fn main() -> Result<()> {
     // Logging setup
-    let verbose = env::var("VERBOSE_LOGS")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
-        .unwrap_or(false);
-    let max_level = if verbose {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
+    // Honor RUST_LOG if provided, otherwise fall back to VERBOSE_LOGS
+    let max_level = match env::var("RUST_LOG").ok().as_deref() {
+        Some("trace") | Some("TRACE") => tracing::Level::TRACE,
+        Some("debug") | Some("DEBUG") => tracing::Level::DEBUG,
+        Some("info") | Some("INFO") => tracing::Level::INFO,
+        Some("warn") | Some("WARN") => tracing::Level::WARN,
+        Some("error") | Some("ERROR") => tracing::Level::ERROR,
+        _ => {
+            let verbose = env::var("VERBOSE_LOGS")
+                .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+                .unwrap_or(false);
+            if verbose { tracing::Level::DEBUG } else { tracing::Level::INFO }
+        }
     };
 
     let subscriber = FmtSubscriber::builder().with_max_level(max_level).finish();

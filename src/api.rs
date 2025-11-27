@@ -7,9 +7,19 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use axum::middleware::{self, Next};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::limit::ConcurrencyLimitLayer;
+use tower::timeout::TimeoutLayer;
 use tower_http::cors::CorsLayer;
+use tower_http::compression::CompressionLayer;
+use axum::error_handling::HandleErrorLayer;
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::fs;
+use axum::body::Body;
 use tower_http::services::ServeDir;
 
 const FRONT_HTML: &str = include_str!("../web/index.html");
@@ -34,6 +44,12 @@ impl PaginationParams {
 #[derive(Clone)]
 pub struct AppState {
     db: Db,
+    metrics: Arc<ServerMetrics>,
+}
+
+#[derive(Default)]
+pub struct ServerMetrics {
+    inflight: AtomicUsize,
 }
 
 #[derive(Serialize)]
@@ -102,7 +118,39 @@ struct NameSummary {
 }
 
 pub async fn start_api(db: Db, port: u16) {
-    let state = AppState { db };
+    let metrics = Arc::new(ServerMetrics { inflight: AtomicUsize::new(0) });
+    let state = AppState { db, metrics: metrics.clone() };
+
+    // Runtime tunables: concurrency & request timeout
+    let max_inflight: usize = std::env::var("API_MAX_INFLIGHT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2048);
+    let timeout_secs: u64 = std::env::var("API_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(15);
+
+    let middleware = ServiceBuilder::new()
+        // Convert middleware errors (e.g., timeouts) into HTTP responses
+        .layer(HandleErrorLayer::new(|err: BoxError| async move {
+            if err.is::<tower::timeout::error::Elapsed>() {
+                return (
+                    axum::http::StatusCode::REQUEST_TIMEOUT,
+                    "request timed out",
+                )
+                    .into_response();
+            }
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("internal error: {}", err),
+            )
+                .into_response()
+        }))
+        .layer(TimeoutLayer::new(std::time::Duration::from_secs(timeout_secs)))
+        .layer(ConcurrencyLimitLayer::new(max_inflight))
+        .layer(CorsLayer::permissive())
+        .layer(CompressionLayer::new());
 
     let app = Router::new()
         // Static HTML entry points
@@ -117,6 +165,7 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/docs", get(docs_page))
         .route("/spec", get(spec_page))
         .route("/api", get(api_docs))
+        .route("/api/v1/metrics", get(get_metrics))
         // JSON feeds powering the frontend widgets
         .route("/api/v1/inscriptions", get(get_inscriptions_feed))
         .route("/api/v1/tokens", get(get_tokens_feed))
@@ -188,13 +237,56 @@ pub async fn start_api(db: Db, port: u16) {
         .route("/api/v1/resolve/:name", get(resolve_name))
         // Static asset server (keep last)
         .nest_service("/static", ServeDir::new("web"))
-        .layer(CorsLayer::permissive())
+        .layer(middleware)
+        // Track in-flight requests for metrics
+        .layer(middleware::from_fn(track_inflight))
         .with_state(state);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("API listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn track_inflight(State(state): State<AppState>, req: axum::http::Request<Body>, next: Next) -> impl IntoResponse {
+    state.metrics.inflight.fetch_add(1, Ordering::Relaxed);
+    let res = next.run(req).await;
+    state.metrics.inflight.fetch_sub(1, Ordering::Relaxed);
+    res
+}
+
+async fn get_metrics(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let inflight = state.metrics.inflight.load(Ordering::Relaxed) as u64;
+    let open_fds = count_open_fds();
+    let (soft, hard) = get_fd_limits();
+    Json(serde_json::json!({
+        "inflight": inflight,
+        "open_fds": open_fds,
+        "limits": { "nofile": { "soft": soft, "hard": hard } }
+    }))
+}
+
+fn count_open_fds() -> serde_json::Value {
+    match fs::read_dir("/proc/self/fd") {
+        Ok(rd) => serde_json::json!(rd.count()),
+        Err(_) => serde_json::Value::Null,
+    }
+}
+
+fn get_fd_limits() -> (serde_json::Value, serde_json::Value) {
+    if let Ok(contents) = fs::read_to_string("/proc/self/limits") {
+        for line in contents.lines() {
+            if line.to_lowercase().contains("max open files") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 5 {
+                    let soft = parts[3].parse::<u64>().ok();
+                    let hard = parts[4].parse::<u64>().ok();
+                    return (serde_json::json!(soft), serde_json::json!(hard));
+                }
+            }
+        }
+    }
+    (serde_json::Value::Null, serde_json::Value::Null)
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -473,7 +565,7 @@ async fn get_token_info(
 async fn get_zrc20_token_summary(
     State(state): State<AppState>,
     Path(tick): Path<String>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let lower = tick.to_lowercase();
     let token_info = state.db.get_token_info(&lower).unwrap_or(None);
     if let Some(raw) = token_info {
@@ -490,7 +582,7 @@ async fn get_zrc20_token_summary(
                 .unwrap_or(0);
             let burned = state.db.get_burned(&lower).unwrap_or(0);
             let consistent = parse_u128(&supply_base) == sum_overall + burned;
-            return Json(serde_json::json!({
+            let body = serde_json::json!({
                 "tick": lower,
                 "dec": dec,
                 "supply_base_units": supply_base,
@@ -501,7 +593,10 @@ async fn get_zrc20_token_summary(
                 "max": max,
                 "lim": lim,
                 "integrity": { "consistent": consistent, "sum_holders_base_units": sum_overall.to_string(), "burned_base_units": burned.to_string() }
-            }));
+            });
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=10"));
+            return (headers, Json(body));
         }
     }
     Json(serde_json::json!({ "error": "Not found" }))
@@ -625,7 +720,7 @@ async fn get_zrc20_transfer(
 async fn get_zrc20_token_integrity(
     State(state): State<AppState>,
     Path(tick): Path<String>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let lower = tick.to_lowercase();
     let token_info = state.db.get_token_info(&lower).unwrap_or(None);
     if let Some(info_str) = token_info {
@@ -640,7 +735,7 @@ async fn get_zrc20_token_integrity(
             let burned = state.db.get_burned(&lower).unwrap_or(0);
             let supply = parse_u128(&supply_base);
             let consistent = supply == sum_overall + burned;
-            return Json(serde_json::json!({
+            let body = serde_json::json!({
                 "tick": lower,
                 "dec": dec,
                 "supply_base_units": supply_base,
@@ -650,7 +745,10 @@ async fn get_zrc20_token_integrity(
                 "holders_positive": holders_positive,
                 "burned_base_units": burned.to_string(),
                 "consistent": consistent
-            }));
+            });
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=10"));
+            return (headers, Json(body));
         }
     }
     Json(serde_json::json!({ "error": "Token not found" }))

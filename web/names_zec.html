@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zord · Names (.zec)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+    <meta name="robots" content="noindex">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="cache-control" content="public, max-age=600">
+    <meta http-equiv="expires" content="600">
+    <meta http-equiv="pragma" content="cache">
+    <link rel="prefetch" href="/static/app.js" as="script">
+    <link rel="prefetch" href="/api/v1/names?page=0&limit=120&tld=zec" as="fetch" crossorigin>
+    <link rel="prefetch" href="/api/v1/status" as="fetch" crossorigin>
+    <script>
+        // Hint the browser to keep connections warm
+        try { new EventSource && (new EventSource('about:blank')).close(); } catch (e) {}
+    </script>
+    <style> .chip[data-tld="zec"].active { border-color: var(--accent); color: var(--fg); } </style>
+    <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+    <header class="bar">
+        <nav>
+            <a href="/">inscriptions</a>
+            <a href="/tokens">zrc-20</a>
+            <a href="/names" class="active">names</a>
+            <a href="/docs">docs</a>
+            <a href="/spec">api</a>
+        </nav>
+        <zord-status></zord-status>
+    </header>
+
+    <main>
+        <section class="controls">
+            <div class="chip-row" id="name-tld-filter">
+                <button type="button" data-tld="" class="chip">ALL</button>
+                <button type="button" data-tld="zec" class="chip active">.ZEC</button>
+                <button type="button" data-tld="zcash" class="chip">.ZCASH</button>
+            </div>
+            <div class="search" style="flex:1;">
+                <input type="text" id="name-search" placeholder="filter names" autocomplete="off" style="width:100%;">
+            </div>
+        </section>
+        <section class="controls">
+            <div class="chip-row" id="name-sort">
+                <button type="button" data-dir="asc" class="chip">A→Z</button>
+                <button type="button" data-dir="desc" class="chip active">Z→A</button>
+            </div>
+        </section>
+        <section class="search" style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="resolver-input" placeholder="resolve name (e.g. alice.zec)" autocomplete="off">
+            <button id="resolver-button">resolve</button>
+            <span id="resolver-result" class="notes"></span>
+        </section>
+        <name-table page-size="120" id="name-list" tld="zec"></name-table>
+    </main>
+
+    <sync-footer></sync-footer>
+
+    <script>
+        const input = document.getElementById('name-search');
+        const table = document.getElementById('name-list');
+        let timer;
+        input.addEventListener('input', (event) => {
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+                table.setAttribute('search-query', event.target.value.trim());
+            }, 150);
+        });
+
+        async function resolveName(name) {
+            const result = document.getElementById('resolver-result');
+            result.textContent = '…';
+            try {
+                const q = name.trim();
+                if (!q || (!q.endsWith('.zec') && !q.endsWith('.zcash'))) {
+                    result.textContent = 'enter a .zec or .zcash name';
+                    return;
+                }
+                const res = await fetch(`/resolve/${encodeURIComponent(q)}`);
+                if (!res.ok) { result.textContent = 'not found'; return; }
+                const data = await res.json();
+                result.textContent = data && data.address ? data.address : 'not found';
+            } catch { result.textContent = 'error resolving'; }
+        }
+        document.getElementById('resolver-button').addEventListener('click', () => resolveName(document.getElementById('resolver-input').value));
+        document.getElementById('resolver-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') resolveName(e.target.value); });
+
+        const tldRow = document.getElementById('name-tld-filter');
+        tldRow.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-tld]'); if (!btn) return;
+            tldRow.querySelectorAll('.chip').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            const val = btn.dataset.tld || '';
+            const tbl = document.getElementById('name-list');
+            if (val) tbl.setAttribute('tld', val); else tbl.removeAttribute('tld');
+            localStorage.setItem('zord_names_tld', val);
+        });
+
+        // Force .zec selection by default for this page
+        localStorage.setItem('zord_names_tld', 'zec');
+
+        const sortRow = document.getElementById('name-sort');
+        const tableEl = document.getElementById('name-list');
+        const savedDir = localStorage.getItem('zord_names_sort_dir') || 'desc';
+        tableEl.setAttribute('sort-dir', savedDir);
+        sortRow.querySelectorAll('.chip').forEach((b)=>{ b.classList.toggle('active', b.dataset.dir === savedDir); });
+        sortRow.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-dir]'); if (!btn) return;
+            sortRow.querySelectorAll('.chip').forEach((b) => b.classList.remove('active'));
+            btn.addEventListener('click', ()=>{});
+            btn.classList.add('active');
+            const dir = btn.dataset.dir; tableEl.setAttribute('sort-dir', dir);
+            localStorage.setItem('zord_names_sort_dir', dir);
+        });
+    </script>
+</body>
+</html>
+

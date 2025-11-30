@@ -47,10 +47,25 @@ async fn main() -> Result<()> {
     let rpc = rpc::ZcashRpcClient::new();
     let indexer = indexer::Indexer::new(rpc, db.clone());
 
-    // Indexer runs alongside the HTTP server
+    // Indexer runs alongside the HTTP server with automatic retry
     let indexer_handle = tokio::spawn(async move {
-        if let Err(e) = indexer.start().await {
-            tracing::error!("Indexer failed: {}", e);
+        let mut retry_delay = std::time::Duration::from_secs(5);
+        let max_retry_delay = std::time::Duration::from_secs(300); // 5 minutes max
+
+        loop {
+            match indexer.start().await {
+                Ok(_) => {
+                    tracing::warn!("Indexer exited normally (unexpected)");
+                    break;
+                }
+                Err(e) => {
+                    tracing::error!("Indexer failed: {} - retrying in {:?}", e, retry_delay);
+                    tokio::time::sleep(retry_delay).await;
+
+                    // Exponential backoff with max cap
+                    retry_delay = std::cmp::min(retry_delay * 2, max_retry_delay);
+                }
+            }
         }
     });
 

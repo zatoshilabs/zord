@@ -50,7 +50,16 @@ impl Indexer {
                 .db
                 .get_latest_indexed_height()?
                 .unwrap_or(start_height - 1);
-            let chain_height = self.rpc.get_block_count().await?;
+
+            // Retry RPC calls with backoff to handle transient network errors
+            let chain_height = match self.rpc.get_block_count().await {
+                Ok(height) => height,
+                Err(e) => {
+                    tracing::warn!("Failed to get block count: {} - retrying in 10s", e);
+                    sleep(Duration::from_secs(10)).await;
+                    continue;
+                }
+            };
             let _ = self.db.set_status("chain_tip", chain_height);
 
             if current_height < chain_height {
